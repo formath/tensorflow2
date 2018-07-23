@@ -487,6 +487,7 @@ class Tensor {
   friend class XlaTensor;             // For access to RefCountIsOne().
   friend class XlaTensorBuffer;  // For access to the private constructor taking
                                  // the buffer
+  friend class RemoteVariableOp;
   template <typename Device, typename T>
   friend class AssignVariableOp;  // For access to RefCountIsOne().
   template <typename Device, typename T>

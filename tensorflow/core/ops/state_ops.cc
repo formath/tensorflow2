@@ -54,6 +54,12 @@ REGISTER_OP("Variable")
       return Status::OK();
     });
 
+REGISTER_OP("RemoteVariable")
+    .Output("ref: dtype")
+    .Attr("shape: shape")
+    .Attr("dtype: type")
+    .SetShapeFn(shape_inference::ExplicitShape);
+
 REGISTER_OP("IsVariableInitialized")
     .Input("ref: Ref(dtype)")
     .Output("is_initialized: bool")
