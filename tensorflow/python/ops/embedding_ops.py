@@ -25,6 +25,7 @@ from tensorflow.python.framework import ops
 from tensorflow.python.framework import sparse_tensor
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import clip_ops
+from tensorflow.python.ops import gen_state_ops
 # Imports gradient definitions.
 from tensorflow.python.ops import data_flow_grad  # pylint: disable=unused-import
 from tensorflow.python.ops import data_flow_ops
@@ -479,3 +480,144 @@ def embedding_lookup_sparse(params,
         assert False, "Unrecognized combiner"
 
     return embeddings
+
+@tf_export("nn.embedding_lookup_sparse_v2")
+def embedding_lookup_sparse_v2(
+    sp_ids,
+    sp_weights=None,
+    embedding_size=None,
+    name=None,
+    combiner=None):
+  """Computes embeddings for the given ids and weights.
+
+  Args:
+    sp_ids: N x M SparseTensor of int64 ids (typically from FeatureValueToId),
+      where N is typically batch size and M is arbitrary.
+    sp_weights: either a SparseTensor of float / double weights, or None to
+      indicate all weights should be taken to be 1. If specified, sp_weights
+      must have exactly the same shape and indices as sp_ids.
+    embedding_size: embedding size.
+    name: Optional name for the op.
+    combiner: A string specifying the reduction op. Currently "mean", "sqrtn"
+      and "sum" are supported.
+      "sum" computes the weighted sum of the embedding results for each row.
+      "mean" is the weighted sum divided by the total weight.
+      "sqrtn" is the weighted sum divided by the square root of the sum of the
+      squares of the weights.
+
+  Returns:
+    A dense tensor representing the combined embeddings for the
+    sparse ids. For each row in the dense tensor represented by sp_ids, the op
+    looks up the embeddings for all ids in that row, multiplies them by the
+    corresponding weight, and combines these embeddings as specified.
+
+  Raises:
+    TypeError: If sp_ids is not a SparseTensor, or if sp_weights is neither
+      None nor SparseTensor.
+    ValueError: If combiner is not one of {"mean", "sqrtn", "sum"}.
+  """
+  if combiner is None:
+    logging.warn("The default value of combiner is sum.")
+    combiner = "sum"
+  if combiner not in ("mean", "sqrtn", "sum"):
+    raise ValueError("combiner must be one of 'mean', 'sqrtn' or 'sum'")
+  if embedding_size is None:
+    raise ValueError("embedding_size should not be none")
+  if embedding_size < 0:
+    raise ValueError("embedding_size should be larger than zero")
+  if not isinstance(sp_ids, sparse_tensor.SparseTensor):
+    raise TypeError("sp_ids must be SparseTensor")
+  ignore_weights = sp_weights is None
+  if not ignore_weights:
+    if not isinstance(sp_weights, sparse_tensor.SparseTensor):
+      raise TypeError("sp_weights must be either None or SparseTensor")
+    sp_ids.values.get_shape().assert_is_compatible_with(
+        sp_weights.values.get_shape())
+    sp_ids.indices.get_shape().assert_is_compatible_with(
+        sp_weights.indices.get_shape())
+    sp_ids.dense_shape.get_shape().assert_is_compatible_with(
+        sp_weights.dense_shape.get_shape())
+
+  with ops.name_scope(name, "embedding_lookup_sparse",
+                      [sp_ids]) as name:
+    segment_ids = sp_ids.indices[:, 0]
+    if segment_ids.dtype != dtypes.int32:
+      segment_ids = math_ops.cast(segment_ids, dtypes.int32)
+
+    ids = sp_ids.values
+    weights = None if ignore_weights else sp_weights.values
+    embeddings = _embedding_lookup_with_remote_sparse_variable(ids,
+                                                               weights,
+                                                               embedding_size,
+                                                               segment_ids)
+
+    # Set weights to all one if ignore weights.
+    if ignore_weights:
+      weights = array_ops.fill([array_ops.shape(segment_ids)[0]], 1)
+    if weights.dtype != embeddings.dtype:
+      weights = math_ops.cast(weights, embeddings.dtype)
+    # Reshape weights.
+    ones = array_ops.fill(
+        array_ops.expand_dims(array_ops.rank(embeddings) - 1, 0), 1)
+    bcast_weights_shape = array_ops.concat([array_ops.shape(weights), ones], 0)
+    orig_weights_shape = weights.get_shape()
+    weights = array_ops.reshape(weights, bcast_weights_shape)
+    if embeddings.get_shape().ndims is not None:
+      weights.set_shape(
+          orig_weights_shape.concatenate(
+              [1 for _ in range(embeddings.get_shape().ndims - 1)]))
+
+    if combiner == "mean":
+      weight_sum = math_ops.segment_sum(weights, segment_ids)
+      embeddings = math_ops.div(embeddings, weight_sum)
+    elif combiner == "sqrtn":
+      weights_squared = math_ops.pow(weights, 2)
+      weight_sum = math_ops.segment_sum(weights_squared, segment_ids)
+      weight_sum_sqrt = math_ops.sqrt(weight_sum)
+      embeddings = math_ops.div(embeddings, weight_sum_sqrt)
+    elif combiner != "sum":
+      assert False, "Unrecognized combiner"
+    return embeddings
+
+
+def _embedding_lookup_with_remote_sparse_variable(ids,
+                                                  weights,
+                                                  embedding_size,
+                                                  segment_ids,
+                                                  name=None):
+  """Looks up embedding for `ids` from a hash variable.
+
+  Args:
+    ids: Ids to look up. Can be a tensor of list shape.
+    name: A name for the operation (optional).
+
+  Returns:
+    A tensor containing the embedding values.
+
+  Raises:
+    TypeError: when `keys` do not match the table data types.
+  """
+  orig_ids = ids
+  if orig_ids.dtype != dtypes.int64:
+    orig_ids = math_ops.cast(orig_ids, dtype=dtypes.int64)
+  emb = gen_state_ops.remote_sparse_variable(keys=orig_ids, embedding_size=embedding_size)
+
+  ignore_weights = weights is None
+  if not ignore_weights:
+    if weights.dtype != emb.dtype:
+      weights = math_ops.cast(weights, emb.dtype)
+      # Reshape to allow broadcast
+      ones = array_ops.fill(
+              array_ops.expand_dims(array_ops.rank(emb) - 1, 0), 1)
+      bcast_weights_shape = array_ops.concat(
+              [array_ops.shape(weights), ones], 0)
+      orig_weights_shape = weights.get_shape()
+      weights = array_ops.reshape(weights, bcast_weights_shape)
+      # Set weights shape after reshape
+      if emb.get_shape().ndims is not None:
+        weights.set_shape(
+                orig_weights_shape.concatenate(
+                    [1 for _ in range(emb.get_shape().ndims - 1)]))
+      emb *= weights
+
+  return math_ops.segment_sum(emb, segment_ids, name=name)

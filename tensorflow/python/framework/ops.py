@@ -5579,6 +5579,10 @@ class GraphKeys(object):
   # NOTE(yuanbyu): internal and experimental.
   _STREAMING_MODEL_PORTS = "streaming_model_ports"
 
+  # For remote_variable and remote_sparse_variable
+  _TRAINABLE_REMOTE_VARIABLES = "trainable_remote_variables"
+  _TRAINABLE_REMOTE_SPARSE_VARIABLES = "trainable_remote_sparse_variables"
+
   @decorator_utils.classproperty
   def VARIABLES(cls):  # pylint: disable=no-self-argument
     logging.log_first_n(logging.WARN,

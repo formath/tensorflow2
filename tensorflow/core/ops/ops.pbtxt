@@ -34808,6 +34808,22 @@ op {
   is_stateful: true
 }
 op {
+  name: "RemoteVariable"
+  output_arg {
+    name: "ref"
+    type_attr: "dtype"
+    is_ref: true
+  }
+  attr {
+    name: "shape"
+    type: "shape"
+  }
+  attr {
+    name: "dtype"
+    type: "type"
+  }
+}
+op {
   name: "Where"
   input_arg {
     name: "input"

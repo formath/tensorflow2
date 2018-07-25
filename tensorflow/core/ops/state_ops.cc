@@ -55,10 +55,23 @@ REGISTER_OP("Variable")
     });
 
 REGISTER_OP("RemoteVariable")
-    .Output("ref: dtype")
+    .Output("ref: float")
     .Attr("shape: shape")
-    .Attr("dtype: type")
     .SetShapeFn(shape_inference::ExplicitShape);
+
+REGISTER_OP("RemoteSparseVariable")
+    .Input("keys: int64")
+    .Output("values: float")
+    .Attr("embedding_size: int")
+    .SetShapeFn([](InferenceContext* c) {
+      //ShapeHandle handle;
+      //TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 1, &handle));
+      //shape_inference::DimensionHandle unused_dim;
+      //TF_RETURN_IF_ERROR(c->WithValue(c->Dim(handle, 0), 2, &unused_dim));
+
+      c->set_output(0, c->UnknownShape());
+      return Status::OK();
+    });
 
 REGISTER_OP("IsVariableInitialized")
     .Input("ref: Ref(dtype)")

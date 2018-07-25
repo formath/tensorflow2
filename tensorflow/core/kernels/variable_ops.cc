@@ -177,6 +177,62 @@ class IsVariableInitializedOp : public OpKernel {
   }
 };
 
+class RemoteVariableOp : public OpKernel {
+ public:
+  explicit RemoteVariableOp(OpKernelConstruction* context)
+      : OpKernel(context) {
+    OP_REQUIRES_OK(context, context->GetAttr("shape", &shape_));
+    dtype_ = RemoveRefType(context->output_type(0));
+  }
+
+  void Compute(OpKernelContext* ctx) override {
+    Tensor* output;
+    ctx->allocate_output(0, shape_, &output);
+    auto output_flat = output->flat<float>();
+    std::vector<float> temp(shape_.num_elements(), 0.5); // TODO: pull from remote ps
+    memcpy(output_flat.data(), temp.data(), temp.size() * sizeof(float));
+  }
+
+ private:
+  DataType dtype_;
+  TensorShape shape_;
+
+  TF_DISALLOW_COPY_AND_ASSIGN(RemoteVariableOp);
+};
+
+class RemoteSparseVariableOp : public OpKernel {
+ public:
+  explicit RemoteSparseVariableOp(OpKernelConstruction* context)
+      : OpKernel(context) {
+    OP_REQUIRES_OK(context, context->GetAttr("embedding_size", &embedding_size_));
+    OP_REQUIRES(
+        context, embedding_size_ > 0,
+        errors::InvalidArgument("Invalid embedding_size for RemoteSparseVariableOp"));
+    dtype_ = RemoveRefType(context->output_type(0));
+  }
+
+  void Compute(OpKernelContext* ctx) override {
+    const Tensor& sparse_ids = ctx->input(0);
+    auto sparse_ids_flat = sparse_ids.flat<int64_t>();
+    int id_num = sparse_ids_flat.size();
+    OP_REQUIRES(
+        ctx, id_num > 0,
+        errors::InvalidArgument("Input have zero id for RemoteSparseVariableOp"));
+    TensorShape shape({id_num, embedding_size_});
+    Tensor* output;
+    ctx->allocate_output(0, shape, &output);
+    auto output_flat = output->flat<float>();
+    std::vector<float> temp(shape.num_elements(), 0.5); // TODO: pull from remote ps
+    memcpy(output_flat.data(), temp.data(), temp.size() * sizeof(float));
+  }
+
+ private:
+  DataType dtype_;
+  int embedding_size_;
+
+  TF_DISALLOW_COPY_AND_ASSIGN(RemoteSparseVariableOp);
+};
+
 REGISTER_KERNEL_BUILDER(Name("Variable").Device(DEVICE_CPU), VariableOp);
 REGISTER_KERNEL_BUILDER(Name("VariableV2").Device(DEVICE_CPU), VariableOp);
 REGISTER_KERNEL_BUILDER(Name("TemporaryVariable").Device(DEVICE_CPU),
@@ -185,6 +241,8 @@ REGISTER_KERNEL_BUILDER(Name("DestroyTemporaryVariable").Device(DEVICE_CPU),
                         DestroyTemporaryVariableOp);
 REGISTER_KERNEL_BUILDER(Name("IsVariableInitialized").Device(DEVICE_CPU),
                         IsVariableInitializedOp);
+REGISTER_KERNEL_BUILDER(Name("RemoteVariable").Device(DEVICE_CPU), RemoteVariableOp);
+REGISTER_KERNEL_BUILDER(Name("RemoteSparseVariable").Device(DEVICE_CPU), RemoteSparseVariableOp);
 
 #ifdef TENSORFLOW_USE_SYCL
 #define REGISTER_SYCL_KERNEL(type)                                          \
