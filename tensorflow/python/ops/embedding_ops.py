@@ -777,4 +777,3 @@ def _prune_invalid_weights(sparse_ids, sparse_weights):
     sparse_ids = sparse_ops.sparse_retain(sparse_ids, is_weights_valid)
     sparse_weights = sparse_ops.sparse_retain(sparse_weights, is_weights_valid)
   return sparse_ids, sparse_weights
->>>>>>> master

@@ -7,8 +7,6 @@ from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import gen_state_ops
 from tensorflow.contrib.lookup import lookup_ops
 
-import partitioned_lookup_ops
-import embedding_ops
 
 sp_ids = tf.SparseTensor(indices=[[0, 0], [1, 0], [2, 0], [2, 1], [3, 0], [3, 1]],
                          values=[18287374, 3847113, 7174746, 18287374, 5173648, 5173648],
