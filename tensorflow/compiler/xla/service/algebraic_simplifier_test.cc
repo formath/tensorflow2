@@ -18,9 +18,11 @@ limitations under the License.
 #include <memory>
 #include <utility>
 
+#include "absl/memory/memory.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
 #include "tensorflow/compiler/xla/layout_util.h"
 #include "tensorflow/compiler/xla/literal.h"
-#include "tensorflow/compiler/xla/ptr_util.h"
 #include "tensorflow/compiler/xla/service/hlo_computation.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/hlo_matchers.h"
@@ -34,12 +36,11 @@ limitations under the License.
 #include "tensorflow/compiler/xla/window_util.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
-#include "tensorflow/core/lib/strings/str_util.h"
-
-using ::testing::ElementsAre;
 
 namespace xla {
 namespace {
+
+using ::testing::ElementsAre;
 
 namespace op = xla::testing::opcode_matchers;
 
@@ -51,7 +52,12 @@ AlgebraicSimplifier::ValidBitcastCallback non_bitcasting_callback() {
   return [](const Shape&, const Shape&) { return false; };
 }
 
-class AlgebraicSimplifierTest : public HloVerifiedTestBase {};
+class AlgebraicSimplifierTest : public HloVerifiedTestBase {
+ public:
+  AlgebraicSimplifierTest()
+      : HloVerifiedTestBase(/*layout_sensitive=*/false,
+                            /*allow_mixed_precision=*/false) {}
+};
 
 // Test that A + 0 is simplified to A
 TEST_F(AlgebraicSimplifierTest, AddZero) {
@@ -1428,6 +1434,37 @@ TEST_F(AlgebraicSimplifierTest, NoBitcastAdded) {
   EXPECT_THAT(computation->root_instruction(), op::Reshape(param0));
 }
 
+// Test transforming reshapes and transposes of rng.
+TEST_F(AlgebraicSimplifierTest, ReshapeOfTransposeOfRngToRng) {
+  HloComputation::Builder builder(TestName());
+  HloInstruction* zero = builder.AddInstruction(
+      HloInstruction::CreateConstant(LiteralUtil::CreateR0<float>(0.0f)));
+  HloInstruction* one = builder.AddInstruction(
+      HloInstruction::CreateConstant(LiteralUtil::CreateR0<float>(1.0f)));
+  HloInstruction* rng0 = builder.AddInstruction(
+      HloInstruction::CreateRng(ShapeUtil::MakeShape(F32, {2, 2}),
+                                RandomDistribution::RNG_UNIFORM, {zero, one}));
+
+  HloInstruction* transpose = builder.AddInstruction(
+      HloInstruction::CreateTranspose(rng0->shape(), rng0, {1, 0}));
+  Shape reshape_shape = builder
+                            .AddInstruction(HloInstruction::CreateReshape(
+                                ShapeUtil::MakeShape(F32, {4}), transpose))
+                            ->shape();
+
+  auto computation = module().AddEntryComputation(builder.Build());
+
+  AlgebraicSimplifier simplifier(/*is_layout_sensitive=*/false,
+                                 bitcasting_callback());
+  EXPECT_TRUE(simplifier.Run(&module()).ValueOrDie());
+
+  // Verify that that reshape(transpose(rng)) is replace by a single rng of the
+  // same shape as the reshape.
+  EXPECT_THAT(computation->root_instruction(), op::Rng());
+  EXPECT_TRUE(ShapeUtil::Equal(computation->root_instruction()->shape(),
+                               reshape_shape));
+}
+
 // Test transforming reshapes to bitcasts under various conditions.
 TEST_F(AlgebraicSimplifierTest, ReshapeReplacedWithBitcast) {
   HloComputation::Builder builder(TestName());
@@ -1941,6 +1978,40 @@ TEST_F(AlgebraicSimplifierTest, SliceOfSliceToSlice) {
   EXPECT_EQ(computation->root_instruction()->slice_limits(1), dim1 - 4);
 }
 
+TEST_F(AlgebraicSimplifierTest, RemoveNoopSort) {
+  auto builder = HloComputation::Builder(TestName());
+
+  Shape keys_shape = ShapeUtil::MakeShape(F32, {1});
+  auto keys = builder.AddInstruction(
+      HloInstruction::CreateParameter(0, keys_shape, "keys"));
+  builder.AddInstruction(HloInstruction::CreateSort(keys_shape, 0, keys));
+  auto module = CreateNewModule();
+  HloComputation* computation = module->AddEntryComputation(builder.Build());
+  AlgebraicSimplifier simplifier(/*is_layout_sensitive=*/false,
+                                 non_bitcasting_callback());
+  ASSERT_TRUE(simplifier.Run(module).ValueOrDie());
+  EXPECT_THAT(computation->root_instruction(), keys);
+}
+
+TEST_F(AlgebraicSimplifierTest, ReplaceEffectiveScalarKeyValueSortWithTuple) {
+  auto builder = HloComputation::Builder(TestName());
+
+  Shape keys_shape = ShapeUtil::MakeShape(F32, {5, 0});
+  Shape values_shape = ShapeUtil::MakeShape(S32, {5, 0});
+  auto keys = builder.AddInstruction(
+      HloInstruction::CreateParameter(0, keys_shape, "keys"));
+  auto values = builder.AddInstruction(
+      HloInstruction::CreateParameter(1, values_shape, "values"));
+  builder.AddInstruction(HloInstruction::CreateSort(
+      ShapeUtil::MakeTupleShape({keys_shape, values_shape}), 0, keys, values));
+  auto module = CreateNewModule();
+  HloComputation* computation = module->AddEntryComputation(builder.Build());
+  AlgebraicSimplifier simplifier(/*is_layout_sensitive=*/false,
+                                 non_bitcasting_callback());
+  ASSERT_TRUE(simplifier.Run(module).ValueOrDie());
+  EXPECT_THAT(computation->root_instruction(), op::Tuple(keys, values));
+}
+
 TEST_F(AlgebraicSimplifierTest, ConvertConvToMatmul) {
   struct ConvTestOptions {
     int in_batch = 10;
@@ -1972,7 +2043,7 @@ TEST_F(AlgebraicSimplifierTest, ConvertConvToMatmul) {
   // Builds a convolution from <options> and runs algebraic simplification on
   // the computation. Returns a string description of the result of
   // simplification.
-  auto build_and_simplify = [&options, this]() -> string {
+  auto build_and_simplify = [&]() -> string {
     HloComputation::Builder b(TestName());
 
     Window window;
@@ -2078,9 +2149,8 @@ TEST_F(AlgebraicSimplifierTest, ConvertConvToMatmul) {
         root->operand(0)->opcode() == HloOpcode::kDot) {
       auto lhs_shape = root->operand(0)->operand(0)->shape();
       auto rhs_shape = root->operand(0)->operand(1)->shape();
-      return tensorflow::strings::StrCat(
-          tensorflow::str_util::Join(lhs_shape.dimensions(), "x"), " DOT ",
-          tensorflow::str_util::Join(rhs_shape.dimensions(), "x"));
+      return absl::StrCat(absl::StrJoin(lhs_shape.dimensions(), "x"), " DOT ",
+                          absl::StrJoin(rhs_shape.dimensions(), "x"));
     }
     return "UNEXPECTED CHANGE";
   };
@@ -2489,8 +2559,8 @@ TEST_F(AlgebraicSimplifierTest, TrivialDynamicSlice) {
       shape,
       builder.AddInstruction(
           HloInstruction::CreateParameter(0, shape, "slice_from")),
-      builder.AddInstruction(HloInstruction::CreateConstant(
-          LiteralUtil::CreateR1<int>({0, 0, 0}))),
+      builder.AddInstruction(HloInstruction::CreateParameter(
+          1, ShapeUtil::MakeShape(U32, {3}), "slice_indices")),
       /*slice_sizes=*/{10, 100, 1000}));
 
   auto computation = module().AddEntryComputation(builder.Build());
@@ -2523,8 +2593,8 @@ TEST_F(AlgebraicSimplifierTest, TrivialDynamicUpdateSlice) {
       builder.AddInstruction(
           HloInstruction::CreateParameter(2, slice_shape, "to_update")),
       slice,
-      builder.AddInstruction(HloInstruction::CreateConstant(
-          LiteralUtil::CreateR1<int>({0, 0, 0})))));
+      builder.AddInstruction(HloInstruction::CreateParameter(
+          3, ShapeUtil::MakeShape(U32, {3}), "update_indices"))));
 
   auto computation = module().AddEntryComputation(builder.Build());
   AlgebraicSimplifier simplifier(/*is_layout_sensitive=*/false,
@@ -2595,11 +2665,10 @@ struct PadReduceWindowEffectiveBroadcastCase {
   bool should_become_broadcast;
 
   string ToTestCaseName() const {
-    return tensorflow::strings::StrCat(
-        tensorflow::str_util::Join(input_spatials, ","), ";",
-        tensorflow::str_util::Join(symmetric_pad_spatials, ","), ";",
-        tensorflow::str_util::Join(reduce_window_spatials, ","), ";", prepend_a,
-        ";", should_become_broadcast);
+    return absl::StrCat(absl::StrJoin(input_spatials, ","), ";",
+                        absl::StrJoin(symmetric_pad_spatials, ","), ";",
+                        absl::StrJoin(reduce_window_spatials, ","), ";",
+                        prepend_a, ";", should_become_broadcast);
   }
 };
 
@@ -2787,7 +2856,12 @@ struct DotOfConcatTestSpec {
 
 class DotOfConcatSimplificationTest
     : public HloVerifiedTestBase,
-      public ::testing::WithParamInterface<DotOfConcatTestSpec> {};
+      public ::testing::WithParamInterface<DotOfConcatTestSpec> {
+ public:
+  DotOfConcatSimplificationTest()
+      : HloVerifiedTestBase(/*layout_sensitive=*/false,
+                            /*allow_mixed_precision=*/false) {}
+};
 
 // Test that we transform
 //  dot(const, concat(A, B, C))
@@ -2960,7 +3034,12 @@ struct DotOfGatherTestSpec {
 
 class DotOfGatherSimplificationTest
     : public HloVerifiedTestBase,
-      public ::testing::WithParamInterface<DotOfGatherTestSpec> {};
+      public ::testing::WithParamInterface<DotOfGatherTestSpec> {
+ public:
+  DotOfGatherSimplificationTest()
+      : HloVerifiedTestBase(/*layout_sensitive=*/false,
+                            /*allow_mixed_precision=*/false) {}
+};
 
 // input: dot(DS(ctA), ctB))
 // where DS(ctA) = DS({M x K}, {s, 0}, {1, K}) and ctB = {K x N}.

@@ -12,8 +12,8 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-#ifndef TENSORFLOW_COMMON_RUNTIME_COLLECTIVE_PARAM_RESOLVER_LOCAL_H_
-#define TENSORFLOW_COMMON_RUNTIME_COLLECTIVE_PARAM_RESOLVER_LOCAL_H_
+#ifndef TENSORFLOW_CORE_COMMON_RUNTIME_COLLECTIVE_PARAM_RESOLVER_LOCAL_H_
+#define TENSORFLOW_CORE_COMMON_RUNTIME_COLLECTIVE_PARAM_RESOLVER_LOCAL_H_
 
 #include <string>
 
@@ -213,8 +213,16 @@ class CollectiveParamResolverLocal : public ParamResolverInterface {
       LOCKS_EXCLUDED(irec->out_mu);
 
   friend class CollectiveParamResolverLocalTest;
+  // Establishes the requested number of subdivision permutations based on the
+  // ring order implicit in the device order.
   static void GenerateSubdivPerms(const string& device, int source_rank,
                                   CollectiveParams* cp);
+  // Establishes the subdivisions for broadcast op.  The first subdiv executes
+  // binary tree bcast with one device per task.  Each subsequent subdiv
+  // executes intra-task binary tree broadcast.
+  static void GenerateBcastSubdivPerms(const string& device, int source_rank,
+                                       const std::vector<int>& dev_per_task,
+                                       CollectiveParams* cp);
 
   const DeviceMgr* dev_mgr_;
   DeviceResolverInterface* dev_resolver_;  // Not owned.
@@ -229,4 +237,4 @@ class CollectiveParamResolverLocal : public ParamResolverInterface {
 
 }  // namespace tensorflow
 
-#endif  // TENSORFLOW_COMMON_RUNTIME_COLLECTIVE_PARAM_RESOLVER_LOCAL_H_
+#endif  // TENSORFLOW_CORE_COMMON_RUNTIME_COLLECTIVE_PARAM_RESOLVER_LOCAL_H_

@@ -18,7 +18,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import collections
+import collections as collections_lib
 import enum  # pylint: disable=g-bad-import-order
 import inspect  # Necessary supplement to tf_inspect to deal with variadic args.
 
@@ -26,6 +26,7 @@ import numpy as np
 from six.moves import zip  # pylint: disable=redefined-builtin
 
 from tensorflow.python.eager import context
+from tensorflow.python.eager import function as eager_function
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import tensor_shape
@@ -49,6 +50,7 @@ from tensorflow.python.util import nest
 from tensorflow.python.util import tf_decorator
 from tensorflow.python.util import tf_inspect
 from tensorflow.python.util.tf_export import tf_export
+from tensorflow.tools.docs import doc_controls
 
 
 class CallConvention(enum.Enum):
@@ -78,6 +80,7 @@ class Layer(checkpointable.CheckpointableBase):
   Users will just instantiate a layer and then treat it as a callable.
 
   We recommend that descendants of `Layer` implement the following methods:
+
   * `__init__()`: Save configuration in member variables
   * `build()`: Called once from `__call__`, when we know the shapes of inputs
     and `dtype`. Should have the calls to `add_weight()`, and then
@@ -174,6 +177,12 @@ class Layer(checkpointable.CheckpointableBase):
 
     self.supports_masking = False
 
+    call_argspec = tf_inspect.getfullargspec(self.call)
+    if 'training' in call_argspec.args:
+      self._expects_training_arg = True
+    else:
+      self._expects_training_arg = False
+
     # Manage input shape information if passed.
     if 'input_shape' in kwargs or 'batch_input_shape' in kwargs:
       # In this case we will later create an input layer
@@ -265,6 +274,7 @@ class Layer(checkpointable.CheckpointableBase):
       return []
     return self._updates
 
+  @doc_controls.for_subclass_implementers
   def add_update(self, updates, inputs=None):
     """Add update op(s), potentially dependent on layer inputs.
 
@@ -365,6 +375,7 @@ class Layer(checkpointable.CheckpointableBase):
     else:
       return self._losses
 
+  @doc_controls.for_subclass_implementers
   def add_loss(self, losses, inputs=None):
     """Add loss tensor(s), potentially dependent on layer inputs.
 
@@ -456,10 +467,12 @@ class Layer(checkpointable.CheckpointableBase):
     """Creates the variables of the layer."""
     self.built = True
 
+  @doc_controls.for_subclass_implementers
   def add_variable(self, *args, **kwargs):
     """Alias for `add_weight`."""
     return self.add_weight(*args, **kwargs)
 
+  @doc_controls.for_subclass_implementers
   def add_weight(self,
                  name,
                  shape,
@@ -472,7 +485,7 @@ class Layer(checkpointable.CheckpointableBase):
                  use_resource=None,
                  synchronization=vs.VariableSynchronization.AUTO,
                  aggregation=vs.VariableAggregation.NONE,
-                 getter=None):
+                 **kwargs):
     """Adds a new variable to the layer, or gets an existing one; returns it.
 
     Arguments:
@@ -493,14 +506,15 @@ class Layer(checkpointable.CheckpointableBase):
       use_resource: Whether to use `ResourceVariable`.
       synchronization: Indicates when a distributed a variable will be
         aggregated. Accepted values are constants defined in the class
-        @{tf.VariableSynchronization}. By default the synchronization is set to
+        `tf.VariableSynchronization`. By default the synchronization is set to
         `AUTO` and the current `DistributionStrategy` chooses
         when to synchronize. If `synchronization` is set to `ON_READ`,
         `trainable` must not be set to `True`.
       aggregation: Indicates how a distributed variable will be aggregated.
         Accepted values are constants defined in the class
-        @{tf.VariableAggregation}.
-      getter: Variable getter argument to be passed to the `Checkpointable` API.
+        `tf.VariableAggregation`.
+      **kwargs: Additional keyword arguments. Accepted values are `getter` and
+        `collections`.
 
     Returns:
       The created variable.  Usually either a `Variable` or `ResourceVariable`
@@ -513,6 +527,13 @@ class Layer(checkpointable.CheckpointableBase):
       ValueError: When giving unsupported dtype and no initializer or when
         trainable has been set to True with synchronization set as `ON_READ`.
     """
+    # Validate optional keyword arguments.
+    for kwarg in kwargs:
+      if kwarg not in ['getter', 'collections']:
+        raise TypeError('Unknown keyword argument:', kwarg)
+    getter = kwargs.pop('getter', None)
+    collections = kwargs.pop('collections', None)
+
     if dtype is None:
       dtype = self.dtype or backend.floatx()
     dtype = dtypes.as_dtype(dtype)
@@ -561,8 +582,10 @@ class Layer(checkpointable.CheckpointableBase):
         trainable=trainable and self.trainable,
         partitioner=partitioner,
         use_resource=use_resource,
+        collections=collections,
         synchronization=synchronization,
         aggregation=aggregation)
+    backend.track_variable(variable)
 
     if regularizer is not None:
       # TODO(fchollet): in the future, this should be handled at the
@@ -639,6 +662,7 @@ class Layer(checkpointable.CheckpointableBase):
           activity_regularization = self._activity_regularizer(output)
         self.add_loss(activity_regularization, inputs=inputs)
 
+  @doc_controls.for_subclass_implementers
   def call(self, inputs, **kwargs):  # pylint: disable=unused-argument
     """This is where the layer's logic lives.
 
@@ -728,9 +752,11 @@ class Layer(checkpointable.CheckpointableBase):
           input_shapes = nest.map_structure(lambda x: x.shape, inputs)
 
         if (not hasattr(self, '_is_graph_network') or
-            self.__class__.__name__ == 'Sequential'):
-          # Only if self is a layer or an instance of a sequential model do we
-          # need to build it.
+            self.__class__.__name__ == 'Sequential' or
+            not hasattr(self.build, '_is_default')):
+          # Only if self is a layer, an instance of a sequential model, or
+          # the user has manually overwritten the build method do we need to
+          # build it.
           self.build(input_shapes)
         # We must set self.built since user defined build functions are not
         # constrained to set self.built.
@@ -764,7 +790,6 @@ class Layer(checkpointable.CheckpointableBase):
 
       if build_graph:
         self._handle_activity_regularization(inputs, outputs)
-        # TODO(fchollet): consider enabling masking for Eager mode.
         self._set_mask_metadata(inputs, outputs, previous_mask)
 
       if in_deferred_mode or build_graph and have_all_keras_metadata(inputs):
@@ -786,16 +811,7 @@ class Layer(checkpointable.CheckpointableBase):
     if hasattr(self, '_initial_weights') and self._initial_weights is not None:
       self.set_weights(self._initial_weights)
       del self._initial_weights
-    self._post_build_cleanup()
     return outputs
-
-  def _post_build_cleanup(self):
-    """Hooks to run after all sub-Layers are built."""
-    # Note that in addition to Layer.__call__, this method is called by Model
-    # after building a graph network (which skips __call__). It should be called
-    # when possible if self.built may have switched from False to True, and is
-    # idempotent.
-    pass  # No-op for Layers which don't override this method.
 
   def apply(self, inputs, *args, **kwargs):
     """Apply the layer on a input.
@@ -830,21 +846,27 @@ class Layer(checkpointable.CheckpointableBase):
         pass
 
   def _set_mask_metadata(self, inputs, outputs, previous_mask):
-    if hasattr(self, 'compute_mask'):
+    # In some cases the mask of the outputs has already been computed by
+    # inner layers and does not need to be recomputed by this layer.
+    mask_already_computed = all(
+        hasattr(x, '_keras_mask') for x in generic_utils.to_list(outputs))
+    if hasattr(self, 'compute_mask') and not mask_already_computed:
       output_mask = self.compute_mask(inputs, previous_mask)
-      if isinstance(outputs, (list, tuple)):
-        if output_mask is None:
-          output_mask = [None for _ in range(len(outputs))]
-        for x, m in zip(outputs, output_mask):
-          try:
-            x._keras_mask = m  # pylint: disable=protected-access
-          except AttributeError:
-            pass  # C type such as dict. Masking not supported in this case.
-      else:
+    else:
+      output_mask = None
+    if isinstance(outputs, (list, tuple)):
+      if output_mask is None:
+        output_mask = [None for _ in range(len(outputs))]
+      for x, m in zip(outputs, output_mask):
         try:
-          outputs._keras_mask = output_mask  # pylint: disable=protected-access
+          x._keras_mask = m  # pylint: disable=protected-access
         except AttributeError:
           pass  # C type such as dict. Masking not supported in this case.
+    else:
+      try:
+        outputs._keras_mask = output_mask  # pylint: disable=protected-access
+      except AttributeError:
+        pass  # C type such as dict. Masking not supported in this case.
 
   def _set_connectivity_metadata_(self, inputs, outputs, args, kwargs):
     call_convention = getattr(self, '_call_convention',
@@ -906,7 +928,7 @@ class Layer(checkpointable.CheckpointableBase):
       assert len(call_args) == 1  # TypeError raised earlier in __call__.
       return call_args[0], call_kwargs
     else:
-      call_arg_spec = tf_inspect.getargspec(self.call)
+      call_arg_spec = tf_inspect.getfullargspec(self.call)
       # There is no explicit "inputs" argument expected or provided to
       # call(). Arguments which have default values are considered non-inputs,
       # and arguments without are considered inputs.
@@ -926,8 +948,8 @@ class Layer(checkpointable.CheckpointableBase):
       _, unwrapped_call = tf_decorator.unwrap(self.call)
       bound_args = inspect.getcallargs(
           unwrapped_call, *call_args, **call_kwargs)
-      if call_arg_spec.keywords is not None:
-        var_kwargs = bound_args.pop(call_arg_spec.keywords)
+      if call_arg_spec.varkw is not None:
+        var_kwargs = bound_args.pop(call_arg_spec.varkw)
         bound_args.update(var_kwargs)
         keyword_arg_names = keyword_arg_names.union(var_kwargs.keys())
       all_args = call_arg_spec.args
@@ -970,6 +992,39 @@ class Layer(checkpointable.CheckpointableBase):
     Returns:
         An input shape tuple.
     """
+    if context.executing_eagerly():
+      # In this case we build the model first in order to do shape inference.
+      # This is acceptable because the framework only calls
+      # `compute_output_shape` on shape values that the layer would later be
+      # built for. It would however cause issues in case a user attempts to
+      # use `compute_output_shape` manually (these users will have to
+      # implement `compute_output_shape` themselves).
+      self.build(input_shape)
+
+      with context.graph_mode():
+        graph = eager_function.CapturingGraph()
+        with graph.as_default():
+          if isinstance(input_shape, list):
+            inputs = [generate_placeholders_from_shape(shape)
+                      for shape in input_shape]
+          else:
+            inputs = generate_placeholders_from_shape(input_shape)
+
+          try:
+            if self._expects_training_arg:
+              outputs = self(inputs, training=False)
+            else:
+              outputs = self(inputs)
+          except TypeError:
+            raise NotImplementedError('We could not automatically infer '
+                                      'the static shape of the layer\'s output.'
+                                      ' Please implement the '
+                                      '`compute_output_shape` method on your '
+                                      'layer (%s).' % self.__class__.__name__)
+      if isinstance(outputs, list):
+        return [output.shape for output in outputs]
+      else:
+        return outputs.shape
     raise NotImplementedError
 
   def compute_mask(self, inputs, mask=None):  # pylint: disable=unused-argument
@@ -1374,11 +1429,13 @@ class Layer(checkpointable.CheckpointableBase):
                            'instead.' % self.name)
 
   @property
+  @doc_controls.do_not_doc_inheritable
   def inbound_nodes(self):
     """Deprecated, do NOT use! Only for compatibility with external Keras."""
     return self._inbound_nodes
 
   @property
+  @doc_controls.do_not_doc_inheritable
   def outbound_nodes(self):
     """Deprecated, do NOT use! Only for compatibility with external Keras."""
     return self._outbound_nodes
@@ -1833,7 +1890,7 @@ def get_default_graph_uid_map():
   graph = ops.get_default_graph()
   name_uid_map = backend.PER_GRAPH_LAYER_NAME_UIDS.get(graph, None)
   if name_uid_map is None:
-    name_uid_map = collections.defaultdict(int)
+    name_uid_map = collections_lib.defaultdict(int)
     backend.PER_GRAPH_LAYER_NAME_UIDS[graph] = name_uid_map
   return name_uid_map
 
@@ -1848,6 +1905,7 @@ def make_variable(name,
                   validate_shape=True,
                   constraint=None,
                   use_resource=None,
+                  collections=None,
                   synchronization=vs.VariableSynchronization.AUTO,
                   aggregation=vs.VariableAggregation.NONE,
                   partitioner=None):  # pylint: disable=unused-argument
@@ -1881,15 +1939,17 @@ def make_variable(name,
     validate_shape: Passed to `vs.variable`.
     constraint: Constraint instance (callable).
     use_resource: Whether to use a `ResourceVariable`.
+    collections: List of graph collections keys. The new variable is added to
+      these collections. Defaults to `[GraphKeys.GLOBAL_VARIABLES]`.
     synchronization: Indicates when a distributed a variable will be
       aggregated. Accepted values are constants defined in the class
-      @{tf.VariableSynchronization}. By default the synchronization is set to
+      `tf.VariableSynchronization`. By default the synchronization is set to
       `AUTO` and the current `DistributionStrategy` chooses
       when to synchronize. If `synchronization` is set to `ON_READ`,
       `trainable` must not be set to `True`.
     aggregation: Indicates how a distributed variable will be aggregated.
       Accepted values are constants defined in the class
-      @{tf.VariableAggregation}.
+      `tf.VariableAggregation`.
     partitioner: Not handled at this time.
 
   Returns:
@@ -1922,6 +1982,17 @@ def make_variable(name,
       validate_shape=validate_shape,
       constraint=constraint,
       use_resource=use_resource,
+      collections=collections,
       synchronization=synchronization,
       aggregation=aggregation)
   return v
+
+
+def default(method):
+  """Decorates a method to detect overrides in subclasses."""
+  method._is_default = True
+  return method
+
+
+def generate_placeholders_from_shape(shape):
+  return array_ops.placeholder(shape=shape, dtype=backend.floatx())

@@ -17,13 +17,15 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from absl.testing import parameterized
+
 from tensorflow.contrib.data.python.ops import optimization
 from tensorflow.python.data.ops import dataset_ops
 from tensorflow.python.framework import errors
 from tensorflow.python.platform import test
 
 
-class OptimizeDatasetTest(test.TestCase):
+class OptimizeDatasetTest(test.TestCase, parameterized.TestCase):
 
   def testAssertSuffix(self):
     dataset = dataset_ops.Dataset.from_tensors(0).apply(
@@ -44,8 +46,7 @@ class OptimizeDatasetTest(test.TestCase):
       with self.assertRaisesRegexp(
           errors.InvalidArgumentError,
           "Asserted Whoops transformation at offset 0 but encountered "
-          "Map transformation instead."
-      ):
+          "Map transformation instead."):
         sess.run(get_next)
 
   def testAssertSuffixShort(self):
@@ -99,7 +100,10 @@ class OptimizeDatasetTest(test.TestCase):
       with self.assertRaises(errors.OutOfRangeError):
         sess.run(get_next)
 
-  def testFunctionLibraryDefinitionModification(self):
+  # TODO(b/112914454): Remove the test or figure out way to copy only new
+  # functions in optimize_dataset_op instead of taking union of old and new
+  # functions.
+  def _testFunctionLibraryDefinitionModification(self):
     dataset = dataset_ops.Dataset.from_tensors(0).map(lambda x: x).apply(
         optimization.optimize(["_test_only_function_rename"]))
     iterator = dataset.make_one_shot_iterator()

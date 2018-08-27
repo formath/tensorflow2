@@ -154,6 +154,7 @@ TFE_TensorHandle* EagerCast(TFE_Context* ctx, TFE_TensorHandle* handle,
   if (TF_GetCode(out_status) != TF_OK) RETURN_ERROR
   TFE_OpSetAttrType(op, "SrcT", src_type_enum);
   TFE_OpSetAttrType(op, "DstT", dst_type_enum);
+  TFE_OpSetAttrBool(op, "Truncate", false);
   TFE_TensorHandle* output = nullptr;
   int num_outputs = 1;
   TFE_Execute(op, &output, &num_outputs, out_status);
@@ -799,9 +800,6 @@ PyObject* TFE_Py_InitEagerTensor(PyObject* base_class) {
   EagerTensorType = &_EagerTensorType;
   Py_INCREF(EagerTensorType);
 #endif
-  // We disable instance based attribute lookup. Its not clear if these
-  // dictionaries are correctly initialized in the first place.
-  EagerTensorType->tp_dictoffset = 0;
   return reinterpret_cast<PyObject*>(EagerTensorType);
 }
 

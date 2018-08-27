@@ -15,10 +15,11 @@ limitations under the License.
 
 #include <memory>
 
+#include "absl/strings/str_join.h"
 #include "tensorflow/compiler/xla/array2d.h"
 #include "tensorflow/compiler/xla/array4d.h"
 #include "tensorflow/compiler/xla/client/local_client.h"
-#include "tensorflow/compiler/xla/client/xla_client/xla_builder.h"
+#include "tensorflow/compiler/xla/client/xla_builder.h"
 #include "tensorflow/compiler/xla/tests/client_library_test_base.h"
 #include "tensorflow/compiler/xla/tests/literal_test_util.h"
 #include "tensorflow/compiler/xla/tests/test_macros.h"
@@ -43,10 +44,8 @@ struct ReverseSpec {
 
   string ToTestCaseName() const {
     return tensorflow::strings::Printf(
-        "reverse_%s_in_dims_%s_%s",
-        tensorflow::str_util::Join(input_dims, "x").c_str(),
-        tensorflow::str_util::Join(reversal, "x").c_str(),
-        use_bfloat16 ? "bf16" : "f32");
+        "reverse_%s_in_dims_%s_%s", absl::StrJoin(input_dims, "x").c_str(),
+        absl::StrJoin(reversal, "x").c_str(), use_bfloat16 ? "bf16" : "f32");
   }
 };
 

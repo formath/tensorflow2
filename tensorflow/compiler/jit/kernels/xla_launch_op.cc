@@ -19,6 +19,7 @@ limitations under the License.
 #include "tensorflow/compiler/jit/xla_device.h"
 #include "tensorflow/compiler/jit/xla_launch_util.h"
 #include "tensorflow/compiler/tf2xla/shape_util.h"
+#include "tensorflow/compiler/tf2xla/tf2xla_util.h"
 #include "tensorflow/compiler/tf2xla/xla_compiler.h"
 #include "tensorflow/compiler/tf2xla/xla_op_registry.h"
 #include "tensorflow/compiler/xla/client/client_library.h"
@@ -153,6 +154,10 @@ void XlaLocalLaunchBase::Compute(OpKernelContext* ctx) {
 
   XlaCompiler::Options options;
   options.client = client;
+  if (ctx->op_device_context() != nullptr) {
+    options.device_ordinal =
+        ctx->op_device_context()->stream()->parent()->device_ordinal();
+  }
   options.device_type = cache->device_type();
   options.flib_def = ctx->function_library()->GetFunctionLibraryDefinition();
   options.graph_def_version = ctx->function_library()->graph_def_version();
@@ -171,17 +176,18 @@ void XlaLocalLaunchBase::Compute(OpKernelContext* ctx) {
   }
   XlaCompiler::CompileOptions compile_options;
   compile_options.is_entry_computation = true;
-  // Optimization: don't resolve constants. If we resolve constants we never
-  // emit them on the device, meaning that if they are needed by a following
-  // computation the host has to transfer them.
-  compile_options.resolve_compile_time_constants = false;
+  // If we resolve constants we never emit them on the device, meaning that if
+  // they are needed by a following computation the host has to transfer
+  // them. Not resolving constants is expected to be faster than resolving
+  // constants.
+  compile_options.resolve_compile_time_constants = true;
   // Optimization: where possible, have the computation return a naked array
   // rather than a one-element tuple.
   compile_options.always_return_tuple = false;
 
   OP_REQUIRES_OK(
       ctx, cache->Compile(options, function_, constant_args, variables, ctx,
-                          &kernel, &executable, &compile_options));
+                          &kernel, &executable, compile_options));
 
   VLOG(1) << "Executing XLA Computation...";
 
@@ -195,7 +201,7 @@ void XlaLocalLaunchBase::Compute(OpKernelContext* ctx) {
   run_options.set_stream(stream);
   run_options.set_allocator(xla_allocator);
   run_options.set_intra_op_thread_pool(&ctx->eigen_cpu_device());
-  run_options.set_rng_seed(ctx->step_id());
+  run_options.set_rng_seed(GetXLARandomSeed());
   Env* env = Env::Default();
   auto start_time = env->NowMicros();
 
@@ -205,7 +211,8 @@ void XlaLocalLaunchBase::Compute(OpKernelContext* ctx) {
   auto elapsed = env->NowMicros() - start_time;
   VLOG(2) << "Elapsed time: " << elapsed << "us";
 
-  launch_context.PopulateOutputs(ctx, kernel, run_result.ConsumeValueOrDie());
+  OP_REQUIRES_OK(ctx, launch_context.PopulateOutputs(
+                          ctx, kernel, run_result.ConsumeValueOrDie()));
   VLOG(1) << "Done";
 }
 

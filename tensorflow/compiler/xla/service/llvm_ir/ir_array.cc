@@ -327,6 +327,7 @@ llvm::Value* IrArray::Index::Linearize(
     llvm::IRBuilder<>* builder) const {
   // Each dimension is multiplied by the product of the sizes of all
   // earlier dimensions and added to the accumulator logical_linear_index.
+  CHECK_EQ(size(), dimensions.size());
   llvm::Value* logical_linear_index = GetConstantWithIndexType(0);
   int64 multiplier = 1;
   for (ssize_t i = size() - 1; i >= 0; --i) {
@@ -341,9 +342,9 @@ llvm::Value* IrArray::Index::Linearize(
   return logical_linear_index;
 }
 
-llvm::Value* IrArray::EmitArrayElementAddress(
-    const IrArray::Index& index, llvm::IRBuilder<>* b,
-    tensorflow::StringPiece name) const {
+llvm::Value* IrArray::EmitArrayElementAddress(const IrArray::Index& index,
+                                              llvm::IRBuilder<>* b,
+                                              absl::string_view name) const {
   if (ShapeUtil::IsScalar(*shape_)) {
     // Special handling of scalars: a scalar pretends to have the same value for
     // every index, thus effectively implementing broadcasting of its value
@@ -401,7 +402,7 @@ void IrArray::AnnotateLoadStoreInstructionWithMetadata(
 
 llvm::Value* IrArray::EmitReadArrayElement(const Index& index,
                                            llvm::IRBuilder<>* b,
-                                           tensorflow::StringPiece name) const {
+                                           absl::string_view name) const {
   llvm::Value* element_address = EmitArrayElementAddress(index, b, name);
   llvm::LoadInst* load = b->CreateLoad(element_address);
   AnnotateLoadStoreInstructionWithMetadata(load);

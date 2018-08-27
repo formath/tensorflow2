@@ -40,7 +40,7 @@ static Status EmitDynamicUpdateSliceInPlaceImpl(
     const Shape& update_shape, const ElementGenerator& start_indices_generator,
     bool is_signed, ElementGenerator update_array_generator,
     const IrArray& output_array, const gpu::LaunchDimensions* launch_dimensions,
-    tensorflow::StringPiece name, llvm::IRBuilder<>* b) {
+    absl::string_view name, llvm::IRBuilder<>* b) {
   const Shape& output_shape = output_array.GetShape();
 
   // Read start indices from start_indices_generator.
@@ -56,10 +56,6 @@ static Status EmitDynamicUpdateSliceInPlaceImpl(
 
     // Clamp the start index so that the update region fits in the operand.
     // start_index = clamp(start_index, 0, output_dim_size - update_dim_size)
-
-    // TODO(b/74360564): This is implementation defined behavior, but is
-    // currently respected by all implementations. Change this if we ever decide
-    // to officially document different behavior.
     llvm::Value* max_bound = b->CreateSub(output_dim_size, update_dim_size);
     llvm::Value* zero = llvm::ConstantInt::get(start_index[i]->getType(), 0);
     start_index[i] =
@@ -105,8 +101,7 @@ static Status EmitDynamicUpdateSliceInPlaceImpl(
 
 Status EmitDynamicUpdateSliceInPlace(
     tensorflow::gtl::ArraySlice<IrArray> operand_arrays,
-    const IrArray& output_array, tensorflow::StringPiece name,
-    llvm::IRBuilder<>* b) {
+    const IrArray& output_array, absl::string_view name, llvm::IRBuilder<>* b) {
   VLOG(2) << "EmitDynamicUpdateSliceInPlace for " << name;
 
   // No need to use operand_arrays[0], the input array of the

@@ -23,6 +23,7 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
+#include "absl/strings/string_view.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
@@ -44,7 +45,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/types.h"
 #include "tensorflow/compiler/xla/xla_data.pb.h"
-#include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/lib/gtl/array_slice.h"
 #include "tensorflow/core/lib/gtl/flatmap.h"
 #include "tensorflow/core/platform/macros.h"
@@ -100,10 +100,14 @@ class IrEmitter : public DfsHloVisitorWithDefault {
 
   llvm::IRBuilder<>* b() { return &b_; }
 
-  // Emits a call to `computation` with scalar arguments `arguments`.
-  StatusOr<llvm::Value*> EmitScalarCall(
-      PrimitiveType return_type, HloComputation* computation,
-      const std::vector<llvm::Value*>& arguments, tensorflow::StringPiece name);
+  // Emit an LLVM global variable for every constant buffer allocation.
+  Status EmitConstantGlobals();
+
+  // Emit code to map one element according to `map_instr`.
+  llvm::Value* EmitElementalMap(
+      const HloMapInstruction& map_instr,
+      tensorflow::gtl::ArraySlice<llvm::Value*> elemental_operands,
+      absl::string_view name);
 
  protected:
   //
@@ -140,15 +144,16 @@ class IrEmitter : public DfsHloVisitorWithDefault {
   Status HandleRecvDone(HloInstruction* recv_done) override;
   Status HandlePad(HloInstruction* pad) override;
   Status HandleTuple(HloInstruction* tuple) override;
-  Status HandleMap(HloInstruction* map) override;
   Status HandleFusion(HloInstruction* fusion) override;
   Status HandleCall(HloInstruction* call) override;
   Status HandleCustomCall(HloInstruction* custom_call) override;
   Status HandleWhile(HloInstruction* xla_while) override;
   Status HandleConcatenate(HloInstruction* concatenate) override;
   Status HandleConditional(HloInstruction* conditional) override;
+  Status HandleScatter(HloInstruction* scatter) override;
   Status HandleAfterAll(HloInstruction* gen_token) override;
   Status HandleIota(HloInstruction* iota) override;
+  Status HandleRng(HloInstruction* rng) override;
   Status FinishVisit(HloInstruction* root) override;
 
   Status Preprocess(HloInstruction* hlo) override;
@@ -214,9 +219,18 @@ class IrEmitter : public DfsHloVisitorWithDefault {
   // computation function being emitted by this emitter.
   llvm::Value* GetTempBuffersArgument();
 
-  // Emits code that computes the address of the given temporary buffer to the
-  // function. target_shape is the shape of this temporary buffer.
-  // The returned Value's type is a pointer to element_type.
+  // Helper for EmitTempBufferPointer.
+  llvm::Value* EmitGlobalTempBufferPointer(const BufferAllocation::Slice& slice,
+                                           const Shape& target_shape);
+
+  // Helper for EmitTempBufferPointer.
+  llvm::Value* EmitThreadLocalTempBufferPointer(
+      const BufferAllocation::Slice& slice, const Shape& target_shape);
+
+  // Emits code that computes the address of the given buffer allocation slice.
+  //
+  // TODO(sanjoy): This should be renamed to reflect that it no longer provides
+  // access to just temporaries.
   llvm::Value* EmitTempBufferPointer(const BufferAllocation::Slice& slice,
                                      const Shape& target_shape);
 
@@ -225,47 +239,29 @@ class IrEmitter : public DfsHloVisitorWithDefault {
   // function that a map operation applies.
   StatusOr<llvm::Function*> EmitFunction(
       HloComputation* function,  // The function to emit.
-      tensorflow::StringPiece
+      absl::string_view
           function_name_suffix);  // Used for LLVM IR register names.
 
-  // Methods that emit a function call.
-  // Parameters:
-  //   function - The LLVM function to call.
-  //   return_shape - The return shape of the HLO computation that was used to
-  //     make the function.  Not the same as the return type of the function
-  //     in LLVM, since we use output parameters for the return type.
-  //   element_count - number of elements to return (array form only).
-  //   parameter_addresses - pointers to be passed to the function as
-  //     parameters.
-  //   name - used for LLVM IR register names.
+  // Emits a call to a thread local function (e.g. to the computation nested
+  // within a reduce or a map).  Thread local callees (by definition) only write
+  // to and read from thread local allocations.
+  //
+  // `parameters` holds the *scalar values* that need to be passed to the
+  // callee.  The return value is the scalar returned by the callee.
+  llvm::Value* EmitThreadLocalCall(
+      const HloComputation& callee,
+      tensorflow::gtl::ArraySlice<llvm::Value*> parameters,
+      absl::string_view name);
 
-  // Emits a function call, returning a scalar, often an element of a larger
-  // array.  Returns a Value for the scalar element returned by the function.
-  llvm::Value* EmitElementFunctionCall(
-      llvm::Function* function, const Shape& return_shape,
-      tensorflow::gtl::ArraySlice<llvm::Value*> parameter_addresses,
-      tensorflow::StringPiece name);
+  // Emits a call to a "global" function (e.g. to the computation nested within
+  // a kWhile or a kCall).  Buffer assignment unabiguously assignes buffers to
+  // the parameters and return values for these computations so there is no need
+  // to explicitly pass parameters or return results.
+  void EmitGlobalCall(const HloComputation& callee, absl::string_view name);
 
-  // Array function call emitter.  Stores the function's result into a supplied
-  // buffer.
-  // Parameters:
-  //   function - The LLVM function to call.
-  //   parameter_addresses - pointers to be passed to the function as
-  //     parameters.
-  //   return_value - pointer to a buffer where the call result is stored.
-
-  void EmitArrayFunctionCallInto(
-      llvm::Function* function,
-      tensorflow::gtl::ArraySlice<llvm::Value*> parameter_addresses,
-      llvm::Value* return_value_buffer, tensorflow::StringPiece name);
-
-  // Array function call emitter.  Returns a Value for the function's return
-  // value buffer address. The return value buffer is alloca'ed by this
-  // function.
-  llvm::Value* EmitArrayFunctionCall(
-      llvm::Function* function, const Shape& return_shape, int64 element_count,
-      tensorflow::gtl::ArraySlice<llvm::Value*> parameter_addresses,
-      tensorflow::StringPiece name);
+  // Returns the buffer to which a global call to `callee` would have written
+  // its result.
+  llvm::Value* GetBufferForGlobalCallReturnValue(const HloComputation& callee);
 
   // Verifies that the element types of all of the given operand instructions
   // match and are of one of the given supported types.
@@ -288,7 +284,7 @@ class IrEmitter : public DfsHloVisitorWithDefault {
       HloInstruction* target_op,
       const llvm_ir::ElementGenerator& element_generator);
   Status EmitTargetElementLoop(
-      HloInstruction* target_op, tensorflow::StringPiece desc,
+      HloInstruction* target_op, absl::string_view desc,
       const llvm_ir::ElementGenerator& element_generator);
 
   // Emits a memcpy from the source instruction's result value to the
@@ -404,11 +400,10 @@ class IrEmitter : public DfsHloVisitorWithDefault {
   NameUniquer name_uniquer_;
 
   // Map containing all previously emitted computations.
-  std::map<HloComputation*, llvm::Function*> emitted_functions_;
+  std::map<const HloComputation*, llvm::Function*> emitted_functions_;
 
   // Map containing all previously emitted thread-local temporary buffers.
-  std::map<std::pair<llvm::Function*, BufferAllocation::Slice>,
-           llvm::AllocaInst*>
+  std::map<std::pair<llvm::Function*, BufferAllocation::Slice>, llvm::Value*>
       thread_local_buffers_;
 
   // The following fields track the IR emission state. According to LLVM memory
@@ -417,6 +412,16 @@ class IrEmitter : public DfsHloVisitorWithDefault {
   // module's function list).
   std::unique_ptr<IrFunction> compute_function_;
   llvm::IRBuilder<> b_;
+
+  // The buffer allocation slice for the root of the computation being compiled.
+  // Only relevant for thread local computations.
+  BufferAllocation::Slice computation_root_allocation_;
+
+  // Maps the buffer allocation slices for the parameters to the computation
+  // being compiled to their parameter numbers.  Only relevant for thread local
+  // computations.
+  tensorflow::gtl::FlatMap<BufferAllocation::Index, int64>
+      computation_parameter_allocations_;
 
   // Maps HLO instructions to their index into the profile counter array.
   const std::unordered_map<const HloInstruction*, int64>
@@ -558,6 +563,9 @@ class IrEmitter : public DfsHloVisitorWithDefault {
   tensorflow::gtl::FlatMap<const Literal*, llvm::Constant*,
                            LiteralPtrHashFunctor, LiteralPtrEqualityFunctor>
       emitted_literals_;
+
+  tensorflow::gtl::FlatMap<BufferAllocation::Index, llvm::Constant*>
+      constant_buffer_to_global_;
 
   TF_DISALLOW_COPY_AND_ASSIGN(IrEmitter);
 };

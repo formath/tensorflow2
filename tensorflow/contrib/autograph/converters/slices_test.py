@@ -38,14 +38,14 @@ class SliceTest(converter_testing.TestCase):
       return l[1]
 
     node, ctx = self.prepare(test_fn, {})
-    def_, = anno.getanno(node.body[0].args.args[0], anno.Static.DEFINITIONS)
+    def_, = anno.getanno(node.args.args[0], anno.Static.DEFINITIONS)
     def_.directives[directives.set_element_type] = {
         'dtype': parser.parse_expression('tf.int32')
     }
     node = slices.transform(node, ctx)
 
     with self.compiled(node, {}, dtypes.int32) as result:
-      with self.test_session() as sess:
+      with self.cached_session() as sess:
         tl = list_ops.tensor_list_from_tensor(
             [1, 2], element_shape=constant_op.constant([], dtype=dtypes.int32))
         y = result.test_fn(tl)
@@ -59,11 +59,11 @@ class SliceTest(converter_testing.TestCase):
       return l[1]
 
     node, ctx = self.prepare(test_fn, {})
-    def_, = anno.getanno(node.body[0].args.args[0], anno.Static.DEFINITIONS)
+    def_, = anno.getanno(node.args.args[0], anno.Static.DEFINITIONS)
     def_.directives[directives.set_element_type] = {
         'dtype': parser.parse_expression('tf.int32')
     }
-    def_, = anno.getanno(node.body[0].body[0].body[0].targets[0],
+    def_, = anno.getanno(node.body[0].body[0].targets[0],
                          anno.Static.DEFINITIONS)
     def_.directives[directives.set_element_type] = {
         'dtype': parser.parse_expression('tf.float32')

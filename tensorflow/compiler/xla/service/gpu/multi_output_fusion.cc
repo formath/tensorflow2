@@ -23,7 +23,9 @@ limitations under the License.
 #include <string>
 #include <utility>
 
+#include "absl/algorithm/container.h"
 #include "tensorflow/compiler/xla/layout_util.h"
+#include "tensorflow/compiler/xla/service/gpu/instruction_fusion.h"
 #include "tensorflow/compiler/xla/service/gpu/ir_emission_utils.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
@@ -47,7 +49,7 @@ bool GpuMultiOutputFusion::ShapesCompatibleForFusion(HloInstruction* instr1,
         // If possible, we want to pick a reduce operand of the fusion root,
         // because it has the most constraints.
         for (const auto* inst : fused_expression_root->operands()) {
-          if (inst->opcode() == HloOpcode::kReduce) {
+          if (IsReductionToVector(*inst)) {
             return inst;
           }
         }
@@ -62,7 +64,7 @@ bool GpuMultiOutputFusion::ShapesCompatibleForFusion(HloInstruction* instr1,
   auto get_element_shape = [&](const HloInstruction* element_instr) {
     // Special handling of kReduce instructions -- the fusion
     // applies to the first operand.
-    if (element_instr->opcode() == HloOpcode::kReduce) {
+    if (IsReductionToVector(*element_instr)) {
       return element_instr->operand(0)->shape();
     }
     return element_instr->shape();
@@ -112,17 +114,25 @@ bool IsInputFusibleReduction(HloInstruction* instr) {
 // of input parameters differ. In such situtations it is beneficial not to fuse.
 // We consider input params with maximum rank only. Params with smaller ranks
 // will be broadcasted and have not been observed to cause data locality issues.
-// TODO(b/110927656): Improve reduce emitters to remove this limitation.
+// TODO(b/111977086): Improve reduce emitters to remove this limitation.
 bool ReduceFriendlyInputLayouts(HloInstruction* instr) {
+  std::vector<HloInstruction*> params;
+  if (instr->opcode() == HloOpcode::kFusion) {
+    params = instr->fused_parameters();
+  } else {
+    for (HloInstruction* operand : instr->operands()) {
+      params.push_back(operand);
+    }
+  }
   int64 max_rank = 0;
   const Layout* max_rank_layout;
-  for (HloInstruction* param : instr->fused_parameters()) {
+  for (HloInstruction* param : params) {
     if (ShapeUtil::Rank(param->shape()) > max_rank) {
       max_rank = ShapeUtil::Rank(param->shape());
       max_rank_layout = &param->shape().layout();
     }
   }
-  return c_all_of(instr->fused_parameters(), [&](HloInstruction* param) {
+  return absl::c_all_of(params, [&](HloInstruction* param) {
     return (ShapeUtil::Rank(param->shape()) < max_rank) ||
            (LayoutUtil::Equal(param->shape().layout(), *max_rank_layout));
   });
@@ -131,10 +141,15 @@ bool ReduceFriendlyInputLayouts(HloInstruction* instr) {
 }  // namespace
 
 bool GpuMultiOutputFusion::IsFusible(HloInstruction* instr) {
-  // We can fuse reduces and loop fusions.
-  return IsInputFusibleReduction(instr) ||
-         (instr->opcode() == HloOpcode::kFusion &&
-          instr->fusion_kind() == HloInstruction::FusionKind::kLoop);
+  // We can fuse reduces and loop fusions. Elementwise instructions can be fused
+  // with any other instruction.
+  // TODO(b/112957171): This should use the same isFusible logic as
+  // instruction_fusion.
+  return instr->IsFusable() &&
+         (IsInputFusibleReduction(instr) ||
+          (instr->opcode() == HloOpcode::kFusion &&
+           instr->fusion_kind() == HloInstruction::FusionKind::kLoop) ||
+          instr->IsElementwise());
 }
 
 int64 GpuMultiOutputFusion::GetProfit(HloInstruction* instr1,
@@ -163,16 +178,23 @@ bool GpuMultiOutputFusion::LegalToFuse(HloInstruction* instr1,
   if (!MultiOutputFusion::LegalToFuse(instr1, instr2)) {
     return false;
   }
+
   // If we're fusing fusions only do it if the fusion kind matches. Loop fusions
   // merge into bigger loop fusions and input (reduce) fusions become fusions
   // with multiple reduce outputs. We could fuse reduce and loop fusions
   // together too (the result being an input fusion) if we find cases where this
-  // improves things.
+  // improves things. Also disable fusing standalone input-fusible reduces into
+  // loop fusions.
   CHECK(instr1->opcode() == HloOpcode::kFusion);
-  if (instr2->opcode() == HloOpcode::kFusion) {
-    return instr1->fusion_kind() == instr2->fusion_kind();
+  if ((instr2->opcode() == HloOpcode::kFusion &&
+       instr1->fusion_kind() != instr2->fusion_kind()) ||
+      (IsReductionToVector(*instr2) &&
+       instr1->fusion_kind() == HloInstruction::FusionKind::kLoop)) {
+    return false;
   }
-  return instr1->fusion_kind() != HloInstruction::FusionKind::kLoop;
+
+  // Do this check last, as it may be expensive.
+  return !GpuInstructionFusion::FusionWouldBeTooLarge(instr1, instr2);
 }
 
 bool GpuMultiOutputFusion::DoProducerConsumerMultiOutputFusion() {
@@ -214,7 +236,7 @@ bool GpuMultiOutputFusion::DoProducerConsumerMultiOutputFusion() {
       const bool is_loop_fusion =
           producer->opcode() == HloOpcode::kFusion &&
           producer->fusion_kind() == HloInstruction::FusionKind::kLoop;
-      if (!is_loop_fusion) {
+      if (!producer->IsElementwise() && !is_loop_fusion) {
         VLOG(3) << producer->name() << " is not a loop fusion.";
         continue;
       }
@@ -233,7 +255,7 @@ bool GpuMultiOutputFusion::DoProducerConsumerMultiOutputFusion() {
       }
       // Do not fuse a producer if the other operands of the fusion are
       // reachable from the producer, this would create a cycle.
-      if (c_any_of(consumer_operands, [&](HloInstruction* operand) {
+      if (absl::c_any_of(consumer_operands, [&](HloInstruction* operand) {
             return producer != operand &&
                    reachability()->IsReachable(producer, operand);
           })) {
@@ -253,7 +275,7 @@ bool GpuMultiOutputFusion::DoProducerConsumerMultiOutputFusion() {
   for (auto& fusion_pair : potential_fusion_list) {
     HloInstruction* producer = fusion_pair.first;
     HloInstruction* consumer = fusion_pair.second;
-    if (!c_any_of(consumer->operands(), [&](HloInstruction* operand) {
+    if (!absl::c_any_of(consumer->operands(), [&](HloInstruction* operand) {
           return producer != operand &&
                  reachability()->IsReachable(producer, operand);
         })) {

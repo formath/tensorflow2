@@ -254,7 +254,7 @@ def embedding_lookup(
 
   This function is used to perform parallel lookups on the list of
   tensors in `params`.  It is a generalization of
-  @{tf.gather}, where `params` is
+  `tf.gather`, where `params` is
   interpreted as a partitioning of a large embedding tensor.  `params` may be
   a `PartitionedVariable` as returned by using `tf.get_variable()` with a
   partitioner.
@@ -428,6 +428,8 @@ def embedding_lookup_sparse(params,
 
     embeddings = embedding_lookup(
         params, ids, partition_strategy=partition_strategy, max_norm=max_norm)
+    if embeddings.dtype in (dtypes.float16, dtypes.bfloat16):
+      embeddings = math_ops.to_float(embeddings)
     if not ignore_weights:
       weights = sp_weights.values
       if weights.dtype != embeddings.dtype:
