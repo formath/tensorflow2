@@ -210,7 +210,7 @@ class RemoteSparseVariableOp : public OpKernel {
 
   void Compute(OpKernelContext* ctx) override {
     const Tensor& sparse_ids = ctx->input(0);
-    auto sparse_ids_flat = sparse_ids.flat<int64_t>();
+    auto sparse_ids_flat = sparse_ids.flat<int64>();
     int id_num = sparse_ids_flat.size();
     OP_REQUIRES(
         ctx, id_num > 0,
