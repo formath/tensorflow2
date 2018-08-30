@@ -1,7 +1,6 @@
 import tensorflow as tf
 from tensorflow.python.framework import ops
-
-import partitioned_lookup_ops
+from tensorflow.python.ops import partitioned_lookup_ops
 
 table = partitioned_lookup_ops.PartitionedMutableHashTable(tf.int64,
                tf.float32,

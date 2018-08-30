@@ -40,6 +40,7 @@ Status InitializableLookupTable::Contain(OpKernelContext* ctx, const Tensor& key
   // a lock by the readers.
   std::atomic_thread_fence(std::memory_order_acquire);
   return DoContain(keys, values);
+}
 
 Status InitializableLookupTable::ImportValues(OpKernelContext* ctx,
                                               const Tensor& keys,

@@ -5,9 +5,8 @@ from tensorflow.python.ops import data_flow_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import array_ops
 from tensorflow.contrib.lookup import lookup_ops
-
-import partitioned_lookup_ops
-import embedding_ops
+from tensorflow.python.ops import partitioned_lookup_ops
+from tensorflow.python.ops import embedding_ops
 
 init_op_list = []
 
