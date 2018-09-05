@@ -1306,8 +1306,8 @@ def index_to_string_table_from_tensor(vocabulary_list,
     return HashTable(init, default_value, shared_name=shared_name, name=scope)
 
 
-ops.NotDifferentiable("LookupTableFind")
-ops.NotDifferentiable("LookupTableFindV2")
+#ops.NotDifferentiable("LookupTableFind")
+#ops.NotDifferentiable("LookupTableFindV2")
 ops.NotDifferentiable("LookupTableContain")
 ops.NotDifferentiable("LookupTableContainV2")
 ops.NotDifferentiable("LookupTableInsert")

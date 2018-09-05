@@ -36,6 +36,7 @@ from tensorflow.contrib.opt.python.training.shampoo import *
 from tensorflow.contrib.opt.python.training.weight_decay_optimizers import *
 from tensorflow.contrib.opt.python.training.powersign import *
 from tensorflow.contrib.opt.python.training.variable_clipping_optimizer import *
+from tensorflow.contrib.opt.python.training.hash_adam_optimizer import *
 # pylint: enable=wildcard-import
 
 from tensorflow.python.util.all_util import remove_undocumented
@@ -67,6 +68,7 @@ _allowed_symbols = [
     'GGTOptimizer',
     'ShampooOptimizer',
     'RegAdagradOptimizer',
+    'HashAdamOptimizer',
 ]
 
 remove_undocumented(__name__, _allowed_symbols)

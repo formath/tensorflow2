@@ -34,6 +34,7 @@ from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.ops import state_ops
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops import variables
+from tensorflow.contrib.lookup.lookup_ops import MutableHashTable
 from tensorflow.python.training import distribute as distribute_lib
 from tensorflow.python.training import distribution_strategy_context
 from tensorflow.python.training import slot_creator
@@ -172,6 +173,22 @@ class _DenseResourceVariableProcessor(_OptimizableVariable):
       return update_op
 
 
+class _MutableHashTableProcessor(_OptimizableVariable):
+  """Processor for MutableHashTable."""
+
+  def __init__(self, v):
+    self._v = v
+
+  def target(self):
+    return self._v._table_ref
+
+  def update_op(self, optimizer, g):
+    if isinstance(g, ops.IndexedSlices):
+      return optimizer._apply_sparse_duplicate_indices(g, self._v)
+    else:
+      raise NotImplementedError("Trying to update a MutableHashTable with not IndexSlices ", self._v)
+
+
 class _TensorProcessor(_OptimizableVariable):
   """Processor for ordinary Tensors.
 
@@ -207,6 +224,8 @@ def _get_processor(v):
     return _RefVariableProcessor(v)
   if isinstance(v, ops.Tensor):
     return _TensorProcessor(v)
+  if isinstance(v, MutableHashTable):
+    return _MutableHashTableProcessor(v)
   raise NotImplementedError("Trying to optimize unsupported type ", v)
 
 
@@ -520,8 +539,12 @@ class Optimizer(
     grads_and_vars = list(zip(grads, var_list))
     self._assert_valid_dtypes(
         [v for g, v in grads_and_vars
-         if g is not None and v.dtype != dtypes.resource])
+         if (g is not None and
+          ((not self._is_hash_table(v) and  v.dtype != dtypes.resource) or self._is_hash_table(v)))])
     return grads_and_vars
+
+  def _is_hash_table(self, var):
+    return hasattr(var, "_table_ref")
 
   def apply_gradients(self, grads_and_vars, global_step=None, name=None):
     """Apply gradients to variables.
@@ -603,7 +626,11 @@ class Optimizer(
             resource_variable_ops.ResourceVariable) and not var._in_graph_mode:  # pylint: disable=protected-access
           scope_name = ""
         else:
-          scope_name = var.op.name
+          if self._is_hash_table(var):
+            scope_name = var.name
+            var = var._table_ref
+          else:
+            scope_name = var.op.name
         with ops.name_scope("update_" + scope_name), ops.colocate_with(var):
           update_ops.append(processor.update_op(self, grad))
       if global_step is None:
@@ -751,6 +778,9 @@ class Optimizer(
       if mirrored_slot is None: return None
       return mirrored_slot.get(device=var.device)
 
+    if self._is_hash_table(var):
+      return named_slots.get(_var_key(var._table_ref), None)
+
     return named_slots.get(_var_key(var), None)
 
   def get_slot_names(self):
@@ -872,7 +902,10 @@ class Optimizer(
     """
     valid_dtypes = self._valid_dtypes()
     for t in tensors:
-      dtype = t.dtype.base_dtype
+      if self._is_hash_table(t):
+        dtype = t.value_dtype.base_dtype
+      else:
+        dtype = t.dtype.base_dtype
       if dtype not in valid_dtypes:
         raise ValueError(
             "Invalid type %r for %s, expected: %s." % (

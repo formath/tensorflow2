@@ -387,6 +387,12 @@ def _PreventGradientGrad(op, _):
       "Gradient explicitly disabled. Reason: %s" % op.get_attr("message"))
 
 
+@ops.RegisterGradient("LookupTableFindV2")
+def _LookupTableFindV2Grad(op, grad):
+  indices = op.inputs[1]
+  return [ops.IndexedSlices(grad, indices, None), None, None]
+
+
 @ops.RegisterGradient("Gather")
 def _GatherGrad(op, grad):
   """Gradient for Gather op."""

@@ -32,6 +32,7 @@ py_library(
         "python/training/sign_decay.py",
         "python/training/variable_clipping_optimizer.py",
         "python/training/weight_decay_optimizers.py",
+        "python/training/hash_adam_optimizer.py",
     ],
     srcs_version = "PY2AND3",
     deps = [
