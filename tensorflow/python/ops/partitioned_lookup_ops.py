@@ -1,9 +1,48 @@
-import tensorflow as tf
+# Copyright 2016 The TensorFlow Authors. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ==============================================================================
+"""Lookup table operations."""
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import collections
+import functools
+import six
+
+from tensorflow.python.compat import compat as fwd_compat
+from tensorflow.python.eager import context
+from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
-from tensorflow.python.ops import data_flow_ops
-from tensorflow.python.ops import math_ops
+from tensorflow.python.framework import sparse_tensor
+from tensorflow.python.framework import tensor_shape
+from tensorflow.python.framework import tensor_util
 from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import control_flow_ops
+from tensorflow.python.ops import gen_lookup_ops
+from tensorflow.python.ops import math_ops
+from tensorflow.python.ops import string_ops
+from tensorflow.python.ops import data_flow_ops
+# go/tf-wildcard-import
+# pylint: disable=wildcard-import
+from tensorflow.python.ops.gen_lookup_ops import *
+# pylint: enable=wildcard-import
+from tensorflow.python.util import compat
+from tensorflow.python.util.deprecation import deprecated
+from tensorflow.python.util.tf_export import tf_export
 from tensorflow.contrib.lookup import lookup_ops
 
 class PartitionedMutableHashTable(object):
@@ -54,13 +93,13 @@ class PartitionedMutableHashTable(object):
       TypeError: when `keys` do not match the table data types.
     """
     original_indices = math_ops.range(array_ops.size(keys))
-    if keys.dtype == tf.string:
-      int_keys = tf.string_to_hash_bucket_fast(keys, tf.int64.max)
-    elif keys.dtype == tf.int64 or keys.dtype == tf.int32:
+    if keys.dtype == dtypes.string:
+      int_keys = string_ops.string_to_hash_bucket_fast(keys, dtypes.int64.max)
+    elif keys.dtype == dtypes.int64 or keys.dtype == dtypes.int32:
       int_keys = keys
     key_assignments = int_keys % self._shard_num
-    if key_assignments.dtype != tf.int32:
-      key_assignments = tf.cast(key_assignments, dtype=tf.int32)
+    if key_assignments.dtype != dtypes.int32:
+      key_assignments = math_ops.cast(key_assignments, dtype=dtypes.int32)
     key_partitions = data_flow_ops.dynamic_partition(keys, key_assignments, self._shard_num)
     indice_partitions = data_flow_ops.dynamic_partition(original_indices, key_assignments, self._shard_num)
     partitioned_result = []
@@ -84,13 +123,13 @@ class PartitionedMutableHashTable(object):
       TypeError: when `keys` do not match the table data types.
     """
     original_indices = math_ops.range(array_ops.size(keys))
-    if keys.dtype == tf.string:
-      int_keys = tf.string_to_hash_bucket_fast(keys, tf.int64.max)
-    elif keys.dtype == tf.int64 or keys.dtype == tf.int32:
+    if keys.dtype == dtypes.string:
+      int_keys = string_ops.string_to_hash_bucket_fast(keys, dtypes.int64.max)
+    elif keys.dtype == dtypes.int64 or keys.dtype == dtypes.int32:
       int_keys = keys
     key_assignments = int_keys % self._shard_num
-    if key_assignments.dtype != tf.int32:
-      key_assignments = tf.cast(key_assignments, dtype=tf.int32)
+    if key_assignments.dtype != dtypes.int32:
+      key_assignments = math_ops.cast(key_assignments, dtype=dtypes.int32)
     key_partitions = data_flow_ops.dynamic_partition(keys, key_assignments, self._shard_num)
     indice_partitions = data_flow_ops.dynamic_partition(original_indices, key_assignments, self._shard_num)
     partitioned_result = []
@@ -134,13 +173,13 @@ class PartitionedMutableHashTable(object):
         types.
     """
     original_indices = math_ops.range(array_ops.size(keys))
-    if keys.dtype == tf.string:
-      int_keys = tf.string_to_hash_bucket_fast(keys, tf.int64.max)
-    elif keys.dtype == tf.int64 or keys.dtype == tf.int32:
+    if keys.dtype == dtypes.string:
+      int_keys = string_ops.string_to_hash_bucket_fast(keys, dtypes.int64.max)
+    elif keys.dtype == dtypes.int64 or keys.dtype == dtypes.int32:
       int_keys = keys
     key_assignments = int_keys % self._shard_num
-    if key_assignments.dtype != tf.int32:
-      key_assignments = tf.cast(key_assignments, dtype=tf.int32)
+    if key_assignments.dtype != dtypes.int32:
+      key_assignments = math_ops.cast(key_assignments, dtype=dtypes.int32)
     key_partitions = data_flow_ops.dynamic_partition(keys, key_assignments, self._shard_num)
     value_partitions = data_flow_ops.dynamic_partition(values, key_assignments, self._shard_num)
     partitioned_ops = []

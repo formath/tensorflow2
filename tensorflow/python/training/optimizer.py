@@ -40,7 +40,7 @@ from tensorflow.python.training import slot_creator
 from tensorflow.python.training.checkpointable import base as checkpointable
 from tensorflow.python.util import nest
 from tensorflow.python.util.tf_export import tf_export
-from tensorflow.contrib.lookup import lookup_ops
+#from tensorflow.contrib.lookup import lookup_ops
 
 
 def get_filtered_grad_fn(grad_fn):
@@ -224,6 +224,7 @@ def _get_processor(v):
     return _RefVariableProcessor(v)
   if isinstance(v, ops.Tensor):
     return _TensorProcessor(v)
+  from tensorflow.contrib.lookup import lookup_ops
   if isinstance(v, lookup_ops.MutableHashTable):
     return _MutableHashTableProcessor(v)
   raise NotImplementedError("Trying to optimize unsupported type ", v)

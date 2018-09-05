@@ -37,7 +37,7 @@ from tensorflow.python.ops import gen_control_flow_ops
 from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.ops import sparse_ops
 from tensorflow.python.ops import variables
-from tensorflow.python.ops import partitioned_lookup_ops
+#from tensorflow.python.ops import partitioned_lookup_ops
 from tensorflow.python.platform import tf_logging as logging
 from tensorflow.python.util.tf_export import tf_export
 
@@ -535,8 +535,8 @@ def embedding_lookup_sparse_with_hash_table(
     combiner = "sum"
   if combiner not in ("mean", "sqrtn", "sum"):
     raise ValueError("combiner must be one of 'mean', 'sqrtn' or 'sum'")
-  if not isinstance(emb_table, partitioned_lookup_ops.PartitionedMutableHashTable):
-    raise TypeError("emb_table must be PartitionedMutableHashTable")
+  #if not isinstance(emb_table, partitioned_lookup_ops.PartitionedMutableHashTable):
+  #  raise TypeError("emb_table must be PartitionedMutableHashTable")
   if not isinstance(sp_ids, sparse_tensor.SparseTensor):
     raise TypeError("sp_ids must be SparseTensor")
   ignore_weights = sp_weights is None
