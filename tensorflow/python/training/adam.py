@@ -123,12 +123,20 @@ class AdamOptimizer(optimizer.Optimizer):
     # workers (these need to go on the same PS, otherwise some updates are
     # silently ignored).
     first_var = min(var_list, key=lambda x: x.name)
-    self._create_non_slot_variable(initial_value=self._beta1,
-                                   name="beta1_power",
-                                   colocate_with=first_var)
-    self._create_non_slot_variable(initial_value=self._beta2,
-                                   name="beta2_power",
-                                   colocate_with=first_var)
+    if self._is_hash_table(first_var):
+      self._create_non_slot_variable(initial_value=self._beta1,
+                                    name="beta1_power",
+                                    colocate_with=first_var._table_ref)
+      self._create_non_slot_variable(initial_value=self._beta2,
+                                    name="beta2_power",
+                                    colocate_with=first_var._table_ref)
+    else:
+      self._create_non_slot_variable(initial_value=self._beta1,
+                                    name="beta1_power",
+                                    colocate_with=first_var)
+      self._create_non_slot_variable(initial_value=self._beta2,
+                                    name="beta2_power",
+                                    colocate_with=first_var)
 
     # Create slots for the first and second moments.
     for v in var_list:
@@ -202,11 +210,37 @@ class AdamOptimizer(optimizer.Optimizer):
                                       use_locking=self._use_locking)
     return control_flow_ops.group(*[var_update, m_t, v_t])
 
+  def _apply_to_mutable_hash_table(self, grad, var):
+    beta1_power, beta2_power = self._get_beta_accumulators()
+    beta1_power = math_ops.cast(beta1_power, var.dtype.base_dtype)
+    beta2_power = math_ops.cast(beta2_power, var.dtype.base_dtype)
+    lr_t = math_ops.cast(self._lr_t, var.dtype.base_dtype)
+    beta1_t = math_ops.cast(self._beta1_t, var.dtype.base_dtype)
+    beta2_t = math_ops.cast(self._beta2_t, var.dtype.base_dtype)
+    epsilon_t = math_ops.cast(self._epsilon_t, var.dtype.base_dtype)
+    lr = (lr_t * math_ops.sqrt(1 - beta2_power) / (1 - beta1_power))
+
+    keys = math_ops.cast(grad.indices, dtypes.int64)
+    m = self.get_slot(var, "m")
+    v = self.get_slot(var, "v")
+    m_t_1 = m.lookup(keys)
+    v_t_1 = v.lookup(keys)
+    m_t = m_t_1 * beta1_t + grad.values * (1 - beta1_t)
+    v_t = v_t_1 * beta2_t + math_ops.square(grad.values) * (1 - beta2_t)
+    with ops.control_dependencies([m.insert(keys, m_t), v.insert(keys, v_t)]):
+      var_t_1 = var.lookup(keys)
+      var_t = var_t_1 - lr * m_t / (math_ops.sqrt(v_t) + epsilon_t)
+      with ops.control_dependencies([var.insert(keys, var_new_value)]):
+        return control_flow_ops.group(var._table_ref, m_t, v_t)
+
   def _apply_sparse(self, grad, var):
-    return self._apply_sparse_shared(
-        grad.values, var, grad.indices,
-        lambda x, i, v: state_ops.scatter_add(  # pylint: disable=g-long-lambda
-            x, i, v, use_locking=self._use_locking))
+    if _is_hash_table(var):
+      return self._apply_to_mutable_hash_table(grad, var)
+    else:
+      return self._apply_sparse_shared(
+          grad.values, var, grad.indices,
+          lambda x, i, v: state_ops.scatter_add(  # pylint: disable=g-long-lambda
+              x, i, v, use_locking=self._use_locking))
 
   def _resource_scatter_add(self, x, i, v):
     with ops.control_dependencies(

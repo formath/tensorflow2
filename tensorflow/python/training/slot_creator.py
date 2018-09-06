@@ -174,7 +174,24 @@ def create_zeros_slot(primary, name, dtype=None, colocate_with_primary=True):
     A `Variable` object.
   """
   if dtype is None:
-    dtype = primary.dtype
+    if _is_hash_table(primary):
+      dtype = primary.value_dtype.base_dtype
+    else:
+      dtype = primary.dtype
+  if _is_hash_table(primary):
+    if colocate_with_primary:
+      distribution_strategy = (
+          distribution_strategy_context.get_distribution_strategy())
+      with distribution_strategy.colocate_vars_with(primary):
+        default_value = array_ops.zeros(array_ops.size(var._default_value))
+        new_slot_variable = lookup_ops.MutableHashTable(
+            dtypes.int64, dtype, default_value, name, "mutable_hash_table")
+        return new_slot_variable
+    else:
+      default_value = array_ops.zeros(array_ops.size(var._default_value))
+      new_slot_variable = lookup_ops.MutableHashTable(
+            dtypes.int64, dtype, default_value, name, "mutable_hash_table")
+      return new_slot_variable
   slot_shape = primary.get_shape()
   if slot_shape.is_fully_defined():
     initializer = init_ops.zeros_initializer(dtype)

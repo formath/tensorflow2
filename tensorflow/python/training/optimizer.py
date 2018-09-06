@@ -77,13 +77,16 @@ def _deduplicate_indexed_slices(values, indices):
       array_ops.shape(unique_indices)[0])
   return (summed_values, unique_indices)
 
+def _is_hash_table(var):
+  return hasattr(var, "_table_ref")
 
 def _var_key(var):
   # TODO(ashankar): Consolidate handling for eager and graph
   if hasattr(var, "op"):
     return (var.op.graph, var.op.name)
+  if _is_hash_table(var):
+    return (var._table_ref.graph, var.name)
   return var._unique_id  # pylint: disable=protected-access
-
 
 class _OptimizableVariable(object):
   """Interface for abstracting over variables in the optimizers."""
@@ -541,11 +544,8 @@ class Optimizer(
     self._assert_valid_dtypes(
         [v for g, v in grads_and_vars
          if (g is not None and
-          ((not self._is_hash_table(v) and  v.dtype != dtypes.resource) or self._is_hash_table(v)))])
+          ((not _is_hash_table(v) and  v.dtype != dtypes.resource) or _is_hash_table(v)))])
     return grads_and_vars
-
-  def _is_hash_table(self, var):
-    return hasattr(var, "_table_ref")
 
   def apply_gradients(self, grads_and_vars, global_step=None, name=None):
     """Apply gradients to variables.
@@ -627,7 +627,7 @@ class Optimizer(
             resource_variable_ops.ResourceVariable) and not var._in_graph_mode:  # pylint: disable=protected-access
           scope_name = ""
         else:
-          if self._is_hash_table(var):
+          if _is_hash_table(var):
             scope_name = var.name
             var = var._table_ref
           else:
@@ -779,10 +779,10 @@ class Optimizer(
       if mirrored_slot is None: return None
       return mirrored_slot.get(device=var.device)
 
-    if self._is_hash_table(var):
+    if _is_hash_table(var):
       return named_slots.get(_var_key(var._table_ref), None)
-
-    return named_slots.get(_var_key(var), None)
+    else:
+      return named_slots.get(_var_key(var), None)
 
   def get_slot_names(self):
     """Return a list of the names of slots created by the `Optimizer`.
@@ -903,7 +903,7 @@ class Optimizer(
     """
     valid_dtypes = self._valid_dtypes()
     for t in tensors:
-      if self._is_hash_table(t):
+      if _is_hash_table(t):
         dtype = t.value_dtype.base_dtype
       else:
         dtype = t.dtype.base_dtype

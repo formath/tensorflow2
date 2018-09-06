@@ -27,6 +27,7 @@
 @@IdTableWithHashBuckets
 @@HashTable
 @@MutableHashTable
+@@PartitionedMutableHashTable
 @@MutableDenseHashTable
 @@TableInitializerBase
 @@KeyValueTensorInitializer

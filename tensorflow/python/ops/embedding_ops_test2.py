@@ -4,27 +4,29 @@ from tensorflow.python.framework import ops
 from tensorflow.python.ops import data_flow_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import array_ops
-from tensorflow.python.ops import partitioned_lookup_ops
 from tensorflow.python.ops import embedding_ops
+from tensorflow.contrib.lookup import lookup_ops
 
 init_op_list = []
 
-emb_table = partitioned_lookup_ops.PartitionedMutableHashTable(tf.int64,
-                                                               tf.float32,
-                                                               [0.0, 0.0, 0.0],
-                                                               shard_num=1,
-                                                               name="sparse_id_embedding",
-                                                               checkpoint=True)
+emb_table = lookup_ops.PartitionedMutableHashTable(tf.int64,
+                                                   tf.float32,
+                                                   [0.0, 0.0, 0.0],
+                                                   shard_num=1,
+                                                   name="sparse_id_embedding",
+                                                   checkpoint=True,
+                                                   training=True)
 keys = ops.convert_to_tensor([18287374, 7174746], dtype=tf.int64)
 values = ops.convert_to_tensor([[0.5, 0.6, 0.7], [0.8, 0.9, 1.0]], dtype=tf.float32)
 init_op_list.append(emb_table.insert(keys, values))
 
-#count_table = partitioned_lookup_ops.PartitionedMutableHashTable(tf.int64,
+#count_table = lookup_ops.PartitionedMutableHashTable(tf.int64,
 #                                                                 tf.int64,
 #                                                                 0,
 #                                                                 shard_num=5,
 #                                                                 name="sparse_id_counter",
-#                                                                 checkpoint=True)
+#                                                                 checkpoint=True,
+#                                                                 trainable=False)
 #keys = ops.convert_to_tensor([18287374, 7174746], dtype=tf.int64)
 #values = ops.convert_to_tensor([1, 1], dtype=tf.int64)
 #init_op_list.append(count_table.insert(keys, values))
