@@ -15,7 +15,7 @@ emb_table = lookup_ops.PartitionedMutableHashTable(tf.int64,
                                                    shard_num=1,
                                                    name="sparse_id_embedding",
                                                    checkpoint=True,
-                                                   training=True)
+                                                   trainable=True)
 keys = ops.convert_to_tensor([18287374, 7174746], dtype=tf.int64)
 values = ops.convert_to_tensor([[0.5, 0.6, 0.7], [0.8, 0.9, 1.0]], dtype=tf.float32)
 init_op_list.append(emb_table.insert(keys, values))
@@ -50,7 +50,7 @@ label = ops.convert_to_tensor([1, 0, 1, 0], dtype=tf.int64)
 cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logit, labels=label)
 loss = tf.reduce_mean(cross_entropy)
 
-opt = tf.train.AdagradOptimizer(learning_rate=0.01)
+opt = tf.train.AdamOptimizer(learning_rate=0.01)
 grads = tf.gradients(loss, [embedding])
 train = opt.minimize(loss)
 
