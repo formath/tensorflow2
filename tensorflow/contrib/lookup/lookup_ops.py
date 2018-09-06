@@ -20,11 +20,23 @@ from __future__ import print_function
 
 import functools
 
+from tensorflow.python.compat import compat as fwd_compat
 from tensorflow.python.eager import context
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import ops
+from tensorflow.python.framework import constant_op
+from tensorflow.python.framework import sparse_tensor
+from tensorflow.python.framework import tensor_shape
+from tensorflow.python.framework import tensor_util
 from tensorflow.python.ops import gen_lookup_ops
 from tensorflow.python.ops import lookup_ops
+from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import control_flow_ops
+from tensorflow.python.ops import gen_lookup_ops
+from tensorflow.python.ops import math_ops
+from tensorflow.python.ops import string_ops
+from tensorflow.python.ops import data_flow_ops
+from tensorflow.python.ops.gen_lookup_ops import *
 # pylint: disable=unused-import
 from tensorflow.python.ops.lookup_ops import FastHashSpec
 from tensorflow.python.ops.lookup_ops import HasherSpec
