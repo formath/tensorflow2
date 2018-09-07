@@ -221,15 +221,15 @@ def _get_processor(v):
       v, resource_variable_ops.ResourceVariable) and not v._in_graph_mode:  # pylint: disable=protected-access
     # True if and only if `v` was initialized eagerly.
     return _DenseResourceVariableProcessor(v)
+  from tensorflow.contrib.lookup import lookup_ops
+  if isinstance(v, lookup_ops.MutableHashTable):
+    return _MutableHashTableProcessor(v)
   if v.op.type == "VarHandleOp":
     return _DenseResourceVariableProcessor(v)
   if isinstance(v, variables.Variable):
     return _RefVariableProcessor(v)
   if isinstance(v, ops.Tensor):
     return _TensorProcessor(v)
-  from tensorflow.contrib.lookup import lookup_ops
-  if isinstance(v, lookup_ops.MutableHashTable):
-    return _MutableHashTableProcessor(v)
   raise NotImplementedError("Trying to optimize unsupported type ", v)
 
 

@@ -539,7 +539,7 @@ class PartitionedMutableHashTable(object):
                name="PartitionedMutableHashTable",
                checkpoint=True,
                initializer=None,
-               trainable=True):
+               trainable=False):
     self._key_dtype = key_dtype
     self._value_dtype = value_dtype
     self._shard_num = shard_num

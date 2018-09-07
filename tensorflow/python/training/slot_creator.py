@@ -40,12 +40,19 @@ from __future__ import division
 from __future__ import print_function
 
 from tensorflow.python.eager import context
+from tensorflow.python.framework import dtypes
+from tensorflow.python.framework import ops
+from tensorflow.python.framework import constant_op
+from tensorflow.python.framework import sparse_tensor
+from tensorflow.python.framework import tensor_shape
+from tensorflow.python.framework import tensor_util
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import init_ops
 from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops import variables
 from tensorflow.python.training import distribution_strategy_context
+from tensorflow.python.training import optimizer
 
 
 def _create_slot_var(primary, val, scope, validate_shape, shape, dtype):
@@ -174,21 +181,22 @@ def create_zeros_slot(primary, name, dtype=None, colocate_with_primary=True):
     A `Variable` object.
   """
   if dtype is None:
-    if _is_hash_table(primary):
+    if optimizer._is_hash_table(primary):
       dtype = primary.value_dtype.base_dtype
     else:
       dtype = primary.dtype
-  if _is_hash_table(primary):
+  if optimizer._is_hash_table(primary):
+    from tensorflow.contrib.lookup import lookup_ops
     if colocate_with_primary:
       distribution_strategy = (
           distribution_strategy_context.get_distribution_strategy())
-      with distribution_strategy.colocate_vars_with(primary):
-        default_value = array_ops.zeros(array_ops.size(var._default_value))
+      with distribution_strategy.colocate_vars_with(primary._table_ref):
+        default_value = array_ops.zeros(array_ops.size(primary._default_value))
         new_slot_variable = lookup_ops.MutableHashTable(
             dtypes.int64, dtype, default_value, name, "mutable_hash_table")
         return new_slot_variable
     else:
-      default_value = array_ops.zeros(array_ops.size(var._default_value))
+      default_value = array_ops.zeros(array_ops.size(primary._default_value))
       new_slot_variable = lookup_ops.MutableHashTable(
             dtypes.int64, dtype, default_value, name, "mutable_hash_table")
       return new_slot_variable

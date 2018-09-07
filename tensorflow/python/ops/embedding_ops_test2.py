@@ -9,13 +9,20 @@ from tensorflow.contrib.lookup import lookup_ops
 
 init_op_list = []
 
+# TODO(J.P.Liu): fix eager error problem with shard_num=1
 emb_table = lookup_ops.PartitionedMutableHashTable(tf.int64,
                                                    tf.float32,
                                                    [0.0, 0.0, 0.0],
-                                                   shard_num=1,
+                                                   shard_num=2,
                                                    name="sparse_id_embedding",
                                                    checkpoint=True,
                                                    trainable=True)
+#emb_table = lookup_ops.MutableHashTable(tf.int64,
+#                            tf.float32,
+#                            [0.0, 0.0, 0.0],
+#                            name="sparse_id_embedding",
+#                            checkpoint=True)
+#tf.add_to_collections([ops.GraphKeys.TRAINABLE_RESOURCE_VARIABLES], emb_table)
 keys = ops.convert_to_tensor([18287374, 7174746], dtype=tf.int64)
 values = ops.convert_to_tensor([[0.5, 0.6, 0.7], [0.8, 0.9, 1.0]], dtype=tf.float32)
 init_op_list.append(emb_table.insert(keys, values))
@@ -51,26 +58,19 @@ cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logit, lab
 loss = tf.reduce_mean(cross_entropy)
 
 opt = tf.train.AdamOptimizer(learning_rate=0.01)
-grads = tf.gradients(loss, [embedding])
 train = opt.minimize(loss)
 
+# TODO(J.P.Liu): check embedding NaN problem during training
 with tf.Session() as sess:
-    sess.run(tf.global_variables_initializer())
-    tf.train.write_graph(sess.graph.as_graph_def(), './', 'graph.txt', as_text=True)
-    writer = tf.summary.FileWriter(logdir='./logdir', graph=sess.graph)
-    writer.flush()
-    exit()
-
-sess = tf.Session()
-sess.run(tf.global_variables_initializer())
-sess.run(tf.local_variables_initializer())
-sess.run(init_op_list)
-#print(embedding.eval(session=sess))
-
-i = 0
-while i < 3:
-  sess.run(train)
-  print("loss = %d" % loss.eval(session=sess))
-  print("embedding = %s" % embedding.eval(session=sess))
-  print("grads = %s" % grads[0].eval(session=sess))
-  i += 1
+  sess.run(tf.global_variables_initializer())
+  sess.run(tf.local_variables_initializer())
+  sess.run(init_op_list)
+  print("init embedding = %s" % embedding.eval(session=sess))
+  i = 0
+  while i < 30:
+    _, lo, emb, wht = sess.run([train, loss, embedding, weight])
+    print("iter: %d loss: %s embedding: %s weight: %s" % (i, lo, emb, wht))
+    i += 1
+  #tf.train.write_graph(sess.graph.as_graph_def(), './', 'graph.txt', as_text=True)
+  #writer = tf.summary.FileWriter(logdir='./logdir', graph=sess.graph)
+  #writer.flush()
