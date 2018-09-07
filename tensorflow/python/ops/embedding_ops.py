@@ -500,7 +500,8 @@ def embedding_lookup_sparse_with_hash_table(
     combiner=None,
     is_training=True,
     count_table=None,
-    count_filter_thr=0):
+    count_filter_thr=0,
+    initializer=None):
   """Computes embeddings for the given ids and weights.
 
   Args:
@@ -522,6 +523,7 @@ def embedding_lookup_sparse_with_hash_table(
     count_filter_thr: A scalar representing the minimum number of id. During training, only `id`
       which count number is greater than the `thr` will be used to get or update its embedding.
       Otherwise, `default` embedding will be used, mostly zero.
+    initializer: A random op.
 
   Returns:
     A dense tensor representing the combined embeddings for the
@@ -570,7 +572,8 @@ def embedding_lookup_sparse_with_hash_table(
                                                    segment_ids,
                                                    is_training=is_training,
                                                    count_table=count_table,
-                                                   count_filter_thr=count_filter_thr)
+                                                   count_filter_thr=count_filter_thr,
+                                                   initializer=initializer)
 
     # Set weights to all one if ignore weights.
     if ignore_weights:
@@ -609,7 +612,7 @@ def _embedding_lookup_with_hash_table(emb_table,
                                       is_training=True,
                                       count_table=None,
                                       count_filter_thr=0,
-                                      initializer="normal"):
+                                      initializer=None):
   """Looks up embedding for `ids` from a hash table.
 
   emb_list = []
@@ -643,6 +646,8 @@ def _embedding_lookup_with_hash_table(emb_table,
   Raises:
     TypeError: when `keys` do not match the table data types.
   """
+  #if initializer is None:
+  #  raise ValueError("Initializer for embedding_lookup_sparse_with_hash_table is None")
   orig_ids = ids
   if orig_ids.dtype != emb_table._key_dtype:
     orig_ids = math_ops.cast(orig_ids, dtype=emb_table._key_dtype)
@@ -662,7 +667,7 @@ def _embedding_lookup_with_hash_table(emb_table,
         emb_val_shape = array_ops.shape(emb_table._default_value)[1:]
         table_insert_op = control_flow_ops.cond(array_ops.size(ids_not_contain) > 0,
           lambda: emb_table.insert(ids_not_contain,
-                                   random_ops.random_normal([array_ops.size(ids_not_contain), 3], mean=0.0, stddev=0.1, dtype=dtypes.float32)),
+                                   random_ops.truncated_normal([array_ops.size(ids_not_contain), 3], mean=0.0, stddev=0.1, dtype=dtypes.float32)),
           lambda: [gen_control_flow_ops.no_op()] * emb_table._shard_num) # TODO. init
         with ops.control_dependencies(table_insert_op):
           emb = emb_table.lookup(orig_ids)
@@ -674,12 +679,12 @@ def _embedding_lookup_with_hash_table(emb_table,
       if isinstance(emb_table, lookup_ops.MutableHashTable) or emb_table._shard_num == 1:
          table_insert_op = control_flow_ops.cond(array_ops.size(ids_not_contain) > 0,
           lambda: emb_table.insert(ids_not_contain,
-                                random_ops.random_normal([array_ops.size(ids_not_contain), 3], mean=0.0, stddev=0.1, dtype=dtypes.float32)),
+                                random_ops.truncated_normal([array_ops.size(ids_not_contain), 3], mean=0.0, stddev=0.1, dtype=dtypes.float32)),
           lambda: [gen_control_flow_ops.no_op()])
       else:
         table_insert_op = control_flow_ops.cond(array_ops.size(ids_not_contain) > 0,
           lambda: emb_table.insert(ids_not_contain,
-                                random_ops.random_normal([array_ops.size(ids_not_contain), 3], mean=0.0, stddev=0.1, dtype=dtypes.float32)),
+                                random_ops.truncated_normal([array_ops.size(ids_not_contain), 3], mean=0.0, stddev=0.1, dtype=dtypes.float32)),
           lambda: [gen_control_flow_ops.no_op()] * emb_table._shard_num)
       with ops.control_dependencies(table_insert_op):
         emb = emb_table.lookup(orig_ids)
