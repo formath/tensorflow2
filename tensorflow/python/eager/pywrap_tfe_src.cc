@@ -216,7 +216,7 @@ bool ParseStringValue(const string& key, PyObject* py_value, TF_Status* status,
 #if PY_MAJOR_VERSION >= 3
   if (PyUnicode_Check(py_value)) {
     Py_ssize_t size = 0;
-    char* buf = PyUnicode_AsUTF8AndSize(py_value, &size);
+    const char* buf = PyUnicode_AsUTF8AndSize(py_value, &size);
     if (buf == nullptr) return false;
     *value = tensorflow::StringPiece(buf, size);
     return true;
@@ -825,7 +825,7 @@ int MaybeRaiseExceptionFromStatus(const tensorflow::Status& status,
   return -1;
 }
 
-char* TFE_GetPythonString(PyObject* o) {
+const char* TFE_GetPythonString(PyObject* o) {
   if (PyBytes_Check(o)) {
     return PyBytes_AsString(o);
   }
@@ -1154,7 +1154,7 @@ PyObject* TFE_Py_TapeSetShouldRecord(PyObject* tensors) {
   Py_RETURN_FALSE;
 }
 
-void TFE_Py_TapeSetWatch(PyObject* tensor) {
+void TFE_Py_TapeWatch(PyObject* tape, PyObject* tensor) {
   if (*ThreadTapeIsStopped()) {
     return;
   }
@@ -1162,9 +1162,7 @@ void TFE_Py_TapeSetWatch(PyObject* tensor) {
   if (PyErr_Occurred()) {
     return;
   }
-  for (TFE_Py_Tape* tape : *GetTapeSet()) {
-    tape->tape->Watch(tensor_id);
-  }
+  reinterpret_cast<TFE_Py_Tape*>(tape)->tape->Watch(tensor_id);
 }
 
 static tensorflow::eager::TapeTensor TapeTensorFromTensor(PyObject* tensor) {
@@ -1350,7 +1348,9 @@ void TFE_Py_TapeSetDeleteTrace(tensorflow::int64 tensor_id) {
 class PyVSpace
     : public tensorflow::eager::VSpace<PyObject, PyBackwardFunction> {
  public:
-  explicit PyVSpace(PyObject* py_vspace) : py_vspace_(py_vspace) {}
+  explicit PyVSpace(PyObject* py_vspace) : py_vspace_(py_vspace) {
+    Py_INCREF(py_vspace_);
+  }
 
   tensorflow::Status Initialize() {
     num_elements_ = PyObject_GetAttrString(py_vspace_, "num_elements_fn");
@@ -1378,6 +1378,8 @@ class PyVSpace
     Py_XDECREF(aggregate_fn_);
     Py_XDECREF(zeros_);
     Py_XDECREF(ones_);
+
+    Py_DECREF(py_vspace_);
   }
 
   tensorflow::int64 NumElements(PyObject* tensor) const final {
@@ -1493,6 +1495,22 @@ class PyVSpace
   PyObject* zeros_;
   PyObject* ones_;
 };
+PyVSpace* py_vspace = nullptr;
+
+PyObject* TFE_Py_RegisterVSpace(PyObject* e) {
+  if (py_vspace != nullptr) {
+    delete py_vspace;
+  }
+
+  py_vspace = new PyVSpace(e);
+  auto status = py_vspace->Initialize();
+  if (MaybeRaiseExceptionFromStatus(status, nullptr)) {
+    delete py_vspace;
+    return nullptr;
+  }
+
+  Py_RETURN_NONE;
+}
 
 std::vector<PyObject*> MakeTensorList(PyObject* tensors) {
   PyObject* seq = PySequence_Fast(tensors, "expected a sequence");
@@ -1509,9 +1527,9 @@ std::vector<PyObject*> MakeTensorList(PyObject* tensors) {
   return list;
 }
 
-PyObject* TFE_Py_TapeGradient(PyObject* tape, PyObject* vspace,
-                              PyObject* target, PyObject* sources,
-                              PyObject* output_gradients, TF_Status* status) {
+PyObject* TFE_Py_TapeGradient(PyObject* tape, PyObject* target,
+                              PyObject* sources, PyObject* output_gradients,
+                              TF_Status* status) {
   TFE_Py_Tape* tape_obj = reinterpret_cast<TFE_Py_Tape*>(tape);
   if (!tape_obj->tape->IsPersistent()) {
     auto* tape_set = GetTapeSet();
@@ -1525,10 +1543,6 @@ PyObject* TFE_Py_TapeGradient(PyObject* tape, PyObject* vspace,
                       "'with tf.GradientTape(persistent=true)'");
       return nullptr;
     }
-  }
-  PyVSpace c_vspace(vspace);
-  if (!c_vspace.Initialize().ok()) {
-    return nullptr;
   }
 
   std::vector<tensorflow::int64> target_vec = MakeTensorIDList(target);
@@ -1553,7 +1567,7 @@ PyObject* TFE_Py_TapeGradient(PyObject* tape, PyObject* vspace,
   }
   std::vector<PyObject*> result;
   status->status = tape_obj->tape->ComputeGradient(
-      c_vspace, target_vec, sources_vec, outgrad_vec, &result);
+      *py_vspace, target_vec, sources_vec, outgrad_vec, &result);
   if (!status->status.ok()) {
     if (PyErr_Occurred()) {
       // Do not propagate the erroneous status as that would swallow the
@@ -1784,6 +1798,7 @@ bool OpDoesntRequireOutput(const string& op_name) {
           "ReadVariableOp",
           "VarHandleOp",
           "Shape",
+          "StridedSlice",
       });
 
   return ops_that_dont_require_outputs->find(op_name) !=

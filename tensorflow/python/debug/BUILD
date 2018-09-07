@@ -265,6 +265,7 @@ py_library(
     name = "stepper_cli",
     srcs = ["cli/stepper_cli.py"],
     srcs_version = "PY2AND3",
+    tags = ["notsan"],
     deps = [
         ":cli_shared",
         ":command_parser",
@@ -524,6 +525,7 @@ cuda_py_test(
         "//tensorflow/python:training",
         "//tensorflow/python:variables",
     ],
+    tags = ["notsan"],
 )
 
 py_test(
@@ -610,6 +612,7 @@ cuda_py_test(
         "//tensorflow/python:training",
         "//tensorflow/python:variables",
     ],
+    tags = ["notsan"],
 )
 
 py_test(
@@ -1055,6 +1058,7 @@ py_test(
     size = "small",
     srcs = ["wrappers/dumping_wrapper_test.py"],
     srcs_version = "PY2AND3",
+    tags = ["notsan"],
     deps = [
         ":debug_data",
         ":dumping_wrapper",
@@ -1100,6 +1104,23 @@ py_test(
     ],
 )
 
+py_test(
+    name = "disk_usage_test",
+    size = "small",
+    srcs = ["wrappers/disk_usage_test.py"],
+    srcs_version = "PY2AND3",
+    deps = [
+        ":dumping_wrapper",
+        ":hooks",
+        "//tensorflow/python:client",
+        "//tensorflow/python:errors",
+        "//tensorflow/python:framework_test_lib",
+        "//tensorflow/python:platform_test",
+        "//tensorflow/python:training",
+        "//tensorflow/python:variables",
+    ],
+)
+
 sh_test(
     name = "examples_test",
     size = "medium",
@@ -1112,4 +1133,5 @@ sh_test(
         ":debug_tflearn_iris",
         ":offline_analyzer",
     ],
+    tags = ["notsan"],
 )

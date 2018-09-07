@@ -216,9 +216,7 @@ def implicit_val_and_grad(f):
                        "function was being computed.")
 
     sources = [v.handle for v in variables]
-    grad = imperative_grad.imperative_grad(_default_vspace,
-                                           this_tape,
-                                           nest.flatten(end_node),
+    grad = imperative_grad.imperative_grad(this_tape, nest.flatten(end_node),
                                            sources)
     return end_node, list(zip(grad, variables))
 
@@ -522,7 +520,7 @@ def make_vjp(f, params=None, persistent=True):
       args = _ensure_unique_tensor_objects(parameter_positions, args)
       for i in parameter_positions:
         sources.append(args[i])
-        tape.watch(args[i])
+        tape.watch(this_tape, args[i])
       result = f(*args)
       if result is None:
         raise ValueError("Cannot differentiate a function that returns None; "
@@ -537,8 +535,8 @@ def make_vjp(f, params=None, persistent=True):
       if dy is not None:
         dy = [ops.convert_to_tensor(x) for x in nest.flatten(dy)]
       return imperative_grad.imperative_grad(
-          _default_vspace, this_tape, nest.flatten(result), sources,
-          output_gradients=dy)
+          this_tape, nest.flatten(result), sources, output_gradients=dy)
+
     return result, vjp
 
   return decorated
@@ -631,9 +629,9 @@ def _ones(shape, dtype):
 _default_vspace = imperative_grad.VSpace(
     num_elements_fn=_num_elements,
     aggregate_fn=_aggregate_grads,
-    tensor_id=ops.tensor_id,
     zeros=_zeros,
     ones=_ones)
+pywrap_tensorflow.TFE_Py_RegisterVSpace(_default_vspace)
 
 
 def _handle_or_self(x):
@@ -748,7 +746,7 @@ class GradientTape(object):
       tensor: a Tensor or list of Tensors.
     """
     for t in nest.flatten(tensor):
-      tape.watch(_handle_or_self(t))
+      tape.watch(self._tape, _handle_or_self(t))
 
   @tf_contextlib.contextmanager
   def stop_recording(self):
@@ -865,7 +863,9 @@ class GradientTape(object):
                           for x in nest.flatten(output_gradients)]
 
     flat_grad = imperative_grad.imperative_grad(
-        _default_vspace, self._tape, nest.flatten(target), flat_sources,
+        self._tape,
+        nest.flatten(target),
+        flat_sources,
         output_gradients=output_gradients)
 
     if not self._persistent:
