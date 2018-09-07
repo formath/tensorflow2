@@ -51,7 +51,7 @@ embedding = embedding_ops.embedding_lookup_sparse_with_hash_table(emb_table,
                                                                   is_training=True,
                                                                   count_table=None,
                                                                   count_filter_thr=1)
-weight = tf.get_variable("weight", initializer=tf.random_normal([3, 2], dtype=tf.float32))
+weight = tf.get_variable("weight", initializer=tf.random_normal([3, 2], mean=0.0, stddev=0.1, dtype=tf.float32))
 logit = tf.matmul(embedding, weight)
 label = ops.convert_to_tensor([1, 0, 1, 0], dtype=tf.int64)
 cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logit, labels=label)
