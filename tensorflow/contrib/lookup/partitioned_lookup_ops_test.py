@@ -17,6 +17,13 @@ out = table.lookup(keys)
 #out = table.size(keys)
 op_list = table.insert(keys, values)
 
-sess = tf.Session()
-sess.run(op_list)
-print(out.eval(session=sess))
+with tf.Session() as sess:
+  sess.run(op_list)
+  print(out.eval(session=sess))
+  saver = tf.train.Saver()
+  saver.save(sess, "./test")
+
+with tf.Session() as sess2:
+  saver = tf.train.Saver()
+  saver.restore(sess2, "./test")
+  print(out.eval(session=sess2))
