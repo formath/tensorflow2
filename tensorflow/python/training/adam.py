@@ -232,11 +232,10 @@ class AdamOptimizer(optimizer.Optimizer):
     v_t_1 = v.lookup(keys)
     m_t = m_t_1 * beta1_t + grad.values * (1 - beta1_t)
     v_t = v_t_1 * beta2_t + math_ops.square(grad.values) * (1 - beta2_t)
-    with ops.control_dependencies([m.insert(keys, m_t), v.insert(keys, v_t)]):
-      var_t_1 = var.lookup(keys)
-      var_t = var_t_1 - lr * m_t / (math_ops.sqrt(v_t) + epsilon_t)
-      with ops.control_dependencies([var.insert(keys, var_t)]):
-        return control_flow_ops.group(var._table_ref, m_t, v_t)
+    var_t_1 = var.lookup(keys)
+    var_t = var_t_1 - lr * m_t / (math_ops.sqrt(v_t) + epsilon_t)
+    with ops.control_dependencies([m.insert(keys, m_t), v.insert(keys, v_t), var.insert(keys, var_t)]):
+      return control_flow_ops.group(*[var._table_ref, m_t, v_t])
 
   def _apply_sparse(self, grad, var):
     if optimizer._is_hash_table(var):
