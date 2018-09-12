@@ -492,6 +492,7 @@ def embedding_lookup_sparse(params,
 
     return embeddings
 
+@tf_export("nn.embedding_lookup_sparse_with_hash_table")
 def embedding_lookup_sparse_with_hash_table(
     emb_table,
     sp_ids,
@@ -664,27 +665,25 @@ def _embedding_lookup_with_hash_table(emb_table,
         pass_ids = array_ops.boolean_mask(ids, counter_pass_thr)
         table_contain_mask = emb_table.contain(pass_ids)
         ids_not_contain = array_ops.boolean_mask(gen_array_ops.reshape(pass_ids, shape=(-1, 1)), gen_math_ops.logical_not(table_contain_mask))
-        emb_val_shape = array_ops.shape(emb_table._default_value)[1:]
         table_insert_op = control_flow_ops.cond(array_ops.size(ids_not_contain) > 0,
           lambda: emb_table.insert(ids_not_contain,
-                                   random_ops.truncated_normal([array_ops.size(ids_not_contain), 3], mean=0.0, stddev=0.1, dtype=dtypes.float32)),
+                                   random_ops.truncated_normal(array_ops.concat([[array_ops.size(ids_not_contain)], array_ops.shape(emb_table._default_value)], 0), mean=0.0, stddev=0.1, dtype=dtypes.float32)),
           lambda: [gen_control_flow_ops.no_op()] * emb_table._shard_num) # TODO. init
         with ops.control_dependencies(table_insert_op):
           emb = emb_table.lookup(orig_ids)
     else:
       table_contain_mask = emb_table.contain(ids)
       ids_not_contain = array_ops.boolean_mask(gen_array_ops.reshape(ids, shape=(-1, 1)), gen_math_ops.logical_not(table_contain_mask))
-      emb_val_shape = array_ops.shape(emb_table._default_value)[1:]
       from tensorflow.contrib.lookup import lookup_ops
       if isinstance(emb_table, lookup_ops.MutableHashTable) or emb_table._shard_num == 1:
          table_insert_op = control_flow_ops.cond(array_ops.size(ids_not_contain) > 0,
           lambda: emb_table.insert(ids_not_contain,
-                                random_ops.truncated_normal([array_ops.size(ids_not_contain), 3], mean=0.0, stddev=0.1, dtype=dtypes.float32)),
+                                random_ops.truncated_normal(array_ops.concat([[array_ops.size(ids_not_contain)], array_ops.shape(emb_table._default_value)], 0), mean=0.0, stddev=0.1, dtype=dtypes.float32)),
           lambda: [gen_control_flow_ops.no_op()])
       else:
         table_insert_op = control_flow_ops.cond(array_ops.size(ids_not_contain) > 0,
           lambda: emb_table.insert(ids_not_contain,
-                                random_ops.truncated_normal([array_ops.size(ids_not_contain), 3], mean=0.0, stddev=0.1, dtype=dtypes.float32)),
+                                random_ops.truncated_normal(array_ops.concat([[array_ops.size(ids_not_contain)], array_ops.shape(emb_table._default_value)], 0), mean=0.0, stddev=0.1, dtype=dtypes.float32)),
           lambda: [gen_control_flow_ops.no_op()] * emb_table._shard_num)
       with ops.control_dependencies(table_insert_op):
         emb = emb_table.lookup(orig_ids)
