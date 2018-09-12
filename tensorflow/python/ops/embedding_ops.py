@@ -32,6 +32,7 @@ from tensorflow.python.ops import data_flow_grad  # pylint: disable=unused-impor
 from tensorflow.python.ops import data_flow_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import random_ops
+from tensorflow.python.ops import init_ops
 from tensorflow.python.ops import gen_math_ops
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import gen_control_flow_ops
@@ -502,7 +503,7 @@ def embedding_lookup_sparse_with_hash_table(
     is_training=True,
     count_table=None,
     count_filter_thr=0,
-    initializer=None):
+    initializer=init_ops.truncated_normal_initializer(mean=0.0, stddev=0.1, dtype=dtypes.float32)):
   """Computes embeddings for the given ids and weights.
 
   Args:
@@ -524,7 +525,7 @@ def embedding_lookup_sparse_with_hash_table(
     count_filter_thr: A scalar representing the minimum number of id. During training, only `id`
       which count number is greater than the `thr` will be used to get or update its embedding.
       Otherwise, `default` embedding will be used, mostly zero.
-    initializer: A random op.
+    initializer: A initializer op.
 
   Returns:
     A dense tensor representing the combined embeddings for the
@@ -647,8 +648,8 @@ def _embedding_lookup_with_hash_table(emb_table,
   Raises:
     TypeError: when `keys` do not match the table data types.
   """
-  #if initializer is None:
-  #  raise ValueError("Initializer for embedding_lookup_sparse_with_hash_table is None")
+  if initializer is None:
+    raise ValueError("Initializer for embedding_lookup_sparse_with_hash_table is None")
   orig_ids = ids
   if orig_ids.dtype != emb_table._key_dtype:
     orig_ids = math_ops.cast(orig_ids, dtype=emb_table._key_dtype)
@@ -667,7 +668,7 @@ def _embedding_lookup_with_hash_table(emb_table,
         ids_not_contain = array_ops.boolean_mask(gen_array_ops.reshape(pass_ids, shape=(-1, 1)), gen_math_ops.logical_not(table_contain_mask))
         table_insert_op = control_flow_ops.cond(array_ops.size(ids_not_contain) > 0,
           lambda: emb_table.insert(ids_not_contain,
-                                   random_ops.truncated_normal(array_ops.concat([[array_ops.size(ids_not_contain)], array_ops.shape(emb_table._default_value)], 0), mean=0.0, stddev=0.1, dtype=dtypes.float32)),
+                                   initializer(array_ops.concat([[array_ops.size(ids_not_contain)], array_ops.shape(emb_table._default_value)], 0))),
           lambda: [gen_control_flow_ops.no_op()] * emb_table._shard_num) # TODO. init
         with ops.control_dependencies(table_insert_op):
           emb = emb_table.lookup(orig_ids)
@@ -678,12 +679,12 @@ def _embedding_lookup_with_hash_table(emb_table,
       if isinstance(emb_table, lookup_ops.MutableHashTable) or emb_table._shard_num == 1:
          table_insert_op = control_flow_ops.cond(array_ops.size(ids_not_contain) > 0,
           lambda: emb_table.insert(ids_not_contain,
-                                random_ops.truncated_normal(array_ops.concat([[array_ops.size(ids_not_contain)], array_ops.shape(emb_table._default_value)], 0), mean=0.0, stddev=0.1, dtype=dtypes.float32)),
+                                initializer(array_ops.concat([[array_ops.size(ids_not_contain)], array_ops.shape(emb_table._default_value)], 0))),
           lambda: [gen_control_flow_ops.no_op()])
       else:
         table_insert_op = control_flow_ops.cond(array_ops.size(ids_not_contain) > 0,
           lambda: emb_table.insert(ids_not_contain,
-                                random_ops.truncated_normal(array_ops.concat([[array_ops.size(ids_not_contain)], array_ops.shape(emb_table._default_value)], 0), mean=0.0, stddev=0.1, dtype=dtypes.float32)),
+                                initializer(array_ops.concat([[array_ops.size(ids_not_contain)], array_ops.shape(emb_table._default_value)], 0))),
           lambda: [gen_control_flow_ops.no_op()] * emb_table._shard_num)
       with ops.control_dependencies(table_insert_op):
         emb = emb_table.lookup(orig_ids)
