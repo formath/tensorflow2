@@ -723,7 +723,7 @@ def _embedding_lookup_with_hash_table(emb_table,
         table_insert_op = control_flow_ops.cond(array_ops.size(ids_not_contain) > 0,
           lambda: emb_table.insert(ids_not_contain,
                                    initializer(array_ops.concat([[array_ops.size(ids_not_contain)], array_ops.shape(emb_table._default_value)], 0))),
-          lambda: [gen_control_flow_ops.no_op()] * emb_table._shard_num) # TODO. init
+          lambda: [gen_control_flow_ops.no_op()] * emb_table._shard_num)
         with ops.control_dependencies(table_insert_op):
           emb = emb_table.lookup(orig_ids)
     else:
