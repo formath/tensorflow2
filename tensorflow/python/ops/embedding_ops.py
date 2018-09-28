@@ -319,6 +319,60 @@ def embedding_lookup(
       transform_fn=None)
 
 
+@tf_export("nn.embedding_lookup_with_hash_table")
+def embedding_lookup_with_hash_table(
+    emb_table,
+    ids,
+    name=None,
+    is_training=True,
+    count_table=None,
+    count_filter_thr=0,
+    initializer=init_ops.truncated_normal_initializer(mean=0.0, stddev=0.1, dtype=dtypes.float32)):
+  """Computes embeddings for the given ids and weights.
+
+  Args:
+    emb_table: A PartitionedMutableHashTable representing the complete embeddings.
+    ids: N x M Tensor of int64 ids (typically from FeatureValueToId),
+      where N is typically batch size and M is arbitrary.
+    name: Optional name for the op.
+    count_table: A PartitionedMutableHashTable representing the count number of id in ids
+      used for sparse filter.
+    count_filter_thr: A scalar representing the minimum number of id. During training, only `id`
+      which count number is greater than the `thr` will be used to get or update its embedding.
+      Otherwise, `default` embedding will be used, mostly zero.
+    initializer: A initializer op.
+
+  Returns:
+    A dense tensor representing the embeddings for the
+    sparse ids. For each row in the dense tensor represented by ids, the op
+    looks up the embeddings for all ids in that row.
+
+  Raises:
+    TypeError: If ids is not a Tensor.
+    ValueError: If combiner is not one of {"mean", "sqrtn", "sum"}.
+  """
+  from tensorflow.contrib.lookup import lookup_ops
+  if not (isinstance(emb_table, lookup_ops.PartitionedMutableHashTable) or
+     isinstance(emb_table, lookup_ops.MutableHashTable)):
+    raise TypeError("emb_table must be MutableHashTable or PartitionedMutableHashTable")
+
+  with ops.name_scope(name, "embedding_lookup_with_hash_table",
+                      [ids]) as name:
+    flap_ids = array_ops.reshape(ids, [array_ops.size(ids)])
+    embeddings = _embedding_lookup_with_hash_table(emb_table,
+                                                   flap_ids,
+                                                   None,
+                                                   None,
+                                                   is_training=is_training,
+                                                   count_table=count_table,
+                                                   count_filter_thr=count_filter_thr,
+                                                   initializer=initializer)
+    embeddings = array_ops.reshape(embeddings,
+                                   array_ops.concat([array_ops.shape(ids),
+                                    array_ops.shape(emb_table._default_value)], 0))
+    return embeddings
+
+
 @tf_export("nn.embedding_lookup_sparse")
 def embedding_lookup_sparse(params,
                             sp_ids,
@@ -560,7 +614,7 @@ def embedding_lookup_sparse_with_hash_table(
     sp_ids.dense_shape.get_shape().assert_is_compatible_with(
         sp_weights.dense_shape.get_shape())
 
-  with ops.name_scope(name, "embedding_lookup_sparse",
+  with ops.name_scope(name, "embedding_lookup_sparse_with_hash_table",
                       [sp_ids]) as name:
     segment_ids = sp_ids.indices[:, 0]
     if segment_ids.dtype != dtypes.int32:
@@ -709,7 +763,10 @@ def _embedding_lookup_with_hash_table(emb_table,
                     [1 for _ in range(emb.get_shape().ndims - 1)]))
       emb *= weights
 
-  return math_ops.segment_sum(emb, segment_ids, name=name)
+  if segment_ids != None:
+    return math_ops.segment_sum(emb, segment_ids, name=name)
+  else:
+    return emb
 
 @tf_export("nn.safe_embedding_lookup_sparse")
 def safe_embedding_lookup_sparse(embedding_weights,
