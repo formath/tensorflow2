@@ -193,12 +193,12 @@ def create_zeros_slot(primary, name, dtype=None, colocate_with_primary=True):
       with distribution_strategy.colocate_vars_with(primary._table_ref):
         default_value = array_ops.zeros(array_ops.size(primary._default_value))
         new_slot_variable = lookup_ops.MutableHashTable(
-            dtypes.int64, dtype, default_value, name, "mutable_hash_table")
+            dtypes.int64, dtype, default_value, None, "mutable_hash_table_for_%s" % name)
         return new_slot_variable
     else:
       default_value = array_ops.zeros(array_ops.size(primary._default_value))
       new_slot_variable = lookup_ops.MutableHashTable(
-            dtypes.int64, dtype, default_value, name, "mutable_hash_table")
+            dtypes.int64, dtype, default_value, None, "mutable_hash_table_for_%s" % name)
       return new_slot_variable
   slot_shape = primary.get_shape()
   if slot_shape.is_fully_defined():

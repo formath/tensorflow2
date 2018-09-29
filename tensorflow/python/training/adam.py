@@ -26,11 +26,13 @@ from tensorflow.python.framework import sparse_tensor
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.framework import tensor_util
 from tensorflow.python.ops import control_flow_ops
+from tensorflow.python.ops import gen_control_flow_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.ops import state_ops
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import gen_array_ops
+from tensorflow.python.ops import logging_ops
 from tensorflow.python.training import optimizer
 from tensorflow.python.training import training_ops
 from tensorflow.python.util.tf_export import tf_export
@@ -227,19 +229,39 @@ class AdamOptimizer(optimizer.Optimizer):
     epsilon_t = math_ops.cast(self._epsilon_t, var._value_dtype.base_dtype)
     lr = (lr_t * math_ops.sqrt(1 - beta2_power) / (1 - beta1_power))
 
-    keys = math_ops.cast(grad.indices, dtypes.int64)
+    all_keys = math_ops.cast(grad.indices, dtypes.int64)
     m = self.get_slot(var, "m")
     v = self.get_slot(var, "v")
-    contain_flag = var.contain(keys)
-    keys = array_ops.boolean_mask(gen_array_ops.reshape(keys, shape=(-1, 1)), contain_flag)
-    m_t_1 = m.lookup(keys)
-    v_t_1 = v.lookup(keys)
-    grad_value = array_ops.boolean_mask(grad.values, array_ops.reshape(contain_flag, [array_ops.size(contain_flag)]))
-    m_t = m_t_1 * beta1_t + grad_value * (1 - beta1_t)
-    v_t = math_ops.abs(v_t_1) * beta2_t + math_ops.square(grad_value) * (1 - beta2_t)
-    var_t_1 = var.lookup(keys)
-    var_t = var_t_1 - lr * m_t / (math_ops.sqrt(v_t) + epsilon_t)
-    return control_flow_ops.group(*[var.insert(keys, var_t), m.insert(keys, m_t), v.insert(keys, v_t)])
+    contain_flag = var.contain(all_keys)
+    keys = array_ops.boolean_mask(gen_array_ops.reshape(all_keys, shape=(-1, 1)), contain_flag)
+
+    def _update_parameter():
+      grad_value = array_ops.boolean_mask(grad.values, array_ops.reshape(contain_flag, [array_ops.size(contain_flag)]))
+      m_t_1 = m.lookup(keys)
+      m_t = m_t_1 * beta1_t + grad_value * (1 - beta1_t)
+      v_t_1 = v.lookup(keys)
+      v_t = v_t_1 * beta2_t + (grad_value * grad_value) * (1 - beta2_t)
+      var_t_1 = var.lookup(keys)
+      var_t = var_t_1 - lr * m_t / (math_ops.sqrt(v_t) + epsilon_t)
+      return control_flow_ops.group(*[m.insert(keys, m_t), v.insert(keys, v_t), var.insert(keys, var_t)])
+
+    def _no_op():
+      return control_flow_ops.group(*[gen_control_flow_ops.no_op()])
+
+    result_op = control_flow_ops.cond(array_ops.size(keys) > 0,
+      _update_parameter,
+      _no_op)
+    return result_op
+    #m_t_1 = m.lookup(keys)
+    #v_t_1 = v.lookup(keys)
+    #grad_value = array_ops.boolean_mask(grad.values, array_ops.reshape(contain_flag, [array_ops.size(contain_flag)]))
+    #m_t = m_t_1 * beta1_t + grad_value * (1 - beta1_t)
+    #v_t = v_t_1 * beta2_t + math_ops.square(grad_value) * (1 - beta2_t)
+    #v_t = logging_ops.Print(v_t, [keys, v_t_1, v_t, grad_value, beta2_t])
+    #with ops.control_dependencies([m_t, v_t]):
+    #  var_t_1 = var.lookup(keys)
+    #  var_t = var_t_1 - lr * m_t / (math_ops.sqrt(v_t) + epsilon_t)
+    #return control_flow_ops.group(*[var.insert(keys, var_t), m.insert(keys, m_t), v.insert(keys, v_t)])
 
   def _apply_sparse(self, grad, var):
     if optimizer._is_hash_table(var):

@@ -301,6 +301,25 @@ def index_to_string(tensor, mapping, default_value="UNK", name=None):
   return table.lookup(tensor)
 
 
+@tf_export("get_mutable_hashtable")
+def get_mutable_hashtable(key_dtype,
+                          value_dtype,
+                          default_value,
+                          shard_num=10,
+                          shared_name=None,
+                          name="PartitionedMutableHashTable",
+                          checkpoint=True,
+                          trainable=False):
+  return PartitionedMutableHashTable(key_dtype,
+                                     value_dtype,
+                                     default_value,
+                                     shard_num=shard_num,
+                                     shared_name=shared_name,
+                                     name=name,
+                                     checkpoint=checkpoint,
+                                     trainable=trainable)
+
+
 class MutableHashTable(LookupInterface, checkpointable.CheckpointableBase):
   """A generic mutable hash table implementation.
 
@@ -538,7 +557,6 @@ class PartitionedMutableHashTable(object):
                shared_name=None,
                name="PartitionedMutableHashTable",
                checkpoint=True,
-               initializer=None,
                trainable=False):
     self._key_dtype = key_dtype
     self._value_dtype = value_dtype
