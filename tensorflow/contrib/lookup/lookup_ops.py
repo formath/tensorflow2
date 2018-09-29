@@ -686,7 +686,7 @@ class PartitionedMutableHashTable(object):
     partitioned_ops = []
     for i in range(self._shard_num):
       partitioned_ops.append(self._table_ref_list[i].insert(key_partitions[i], value_partitions[i]))
-    return partitioned_ops
+    return control_flow_ops.group(*partitioned_ops)
 
 
 class MutableDenseHashTable(LookupInterface, checkpointable.CheckpointableBase):

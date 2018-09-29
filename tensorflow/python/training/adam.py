@@ -252,16 +252,6 @@ class AdamOptimizer(optimizer.Optimizer):
       _update_parameter,
       _no_op)
     return result_op
-    #m_t_1 = m.lookup(keys)
-    #v_t_1 = v.lookup(keys)
-    #grad_value = array_ops.boolean_mask(grad.values, array_ops.reshape(contain_flag, [array_ops.size(contain_flag)]))
-    #m_t = m_t_1 * beta1_t + grad_value * (1 - beta1_t)
-    #v_t = v_t_1 * beta2_t + math_ops.square(grad_value) * (1 - beta2_t)
-    #v_t = logging_ops.Print(v_t, [keys, v_t_1, v_t, grad_value, beta2_t])
-    #with ops.control_dependencies([m_t, v_t]):
-    #  var_t_1 = var.lookup(keys)
-    #  var_t = var_t_1 - lr * m_t / (math_ops.sqrt(v_t) + epsilon_t)
-    #return control_flow_ops.group(*[var.insert(keys, var_t), m.insert(keys, m_t), v.insert(keys, v_t)])
 
   def _apply_sparse(self, grad, var):
     if optimizer._is_hash_table(var):

@@ -9,7 +9,6 @@ from tensorflow.contrib.lookup import lookup_ops
 
 init_op_list = []
 
-# TODO(J.P.Liu): fix eager error problem with shard_num=1
 emb_table = lookup_ops.PartitionedMutableHashTable(tf.int64,
                                                    tf.float32,
                                                    [0.0, 0.0, 0.0],
@@ -54,7 +53,6 @@ loss = tf.reduce_mean(cross_entropy)
 opt = tf.train.AdamOptimizer(learning_rate=0.01)
 train = opt.minimize(loss)
 
-# TODO(J.P.Liu): check weight NaN problem during training
 with tf.Session() as sess:
   sess.run([tf.global_variables_initializer(), tf.local_variables_initializer()])
   i = 0

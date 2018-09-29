@@ -9,7 +9,6 @@ from tensorflow.contrib.lookup import lookup_ops
 
 init_op_list = []
 
-# TODO(J.P.Liu): fix eager error problem with shard_num=1
 emb_table = lookup_ops.PartitionedMutableHashTable(tf.int64,
                                                    tf.float32,
                                                    [0.0, 0.0, 0.0],
