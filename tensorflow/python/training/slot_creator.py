@@ -52,8 +52,9 @@ from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops import variables
 from tensorflow.python.training import distribution_strategy_context
-from tensorflow.python.training import optimizer
 
+def _is_hash_table(var):
+  return hasattr(var, "_table_ref")
 
 def _create_slot_var(primary, val, scope, validate_shape, shape, dtype):
   """Helper function for creating a slot variable."""
@@ -181,11 +182,11 @@ def create_zeros_slot(primary, name, dtype=None, colocate_with_primary=True):
     A `Variable` object.
   """
   if dtype is None:
-    if optimizer._is_hash_table(primary):
+    if _is_hash_table(primary):
       dtype = primary.value_dtype.base_dtype
     else:
       dtype = primary.dtype
-  if optimizer._is_hash_table(primary):
+  if _is_hash_table(primary):
     from tensorflow.contrib.lookup import lookup_ops
     if colocate_with_primary:
       distribution_strategy = (
