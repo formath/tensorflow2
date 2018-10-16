@@ -680,7 +680,7 @@ def _embedding_lookup_with_hash_table(emb_table,
           if !emb_table.contain(id):
             emb = init()
             emb_table.insert(id, emb)
-        emb_list.append(emb_table.lookup(id)) # emb_table查不到的用默认值
+        emb_list.append(emb_table.lookup(id))
     else:
       for id in ids:
         if !emb_table.contain(id):
