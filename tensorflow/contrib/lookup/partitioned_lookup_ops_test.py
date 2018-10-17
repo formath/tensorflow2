@@ -1,8 +1,8 @@
 import tensorflow as tf
 from tensorflow.python.framework import ops
-from tensorflow.contrib.lookup import lookup_ops
+import tensorflow.contrib.lookup as lookup
 
-table = lookup_ops.PartitionedMutableHashTable(tf.int64,
+table = lookup.PartitionedMutableHashTable(tf.int64,
                tf.float32,
                [0, 0, 0],
                shard_num=2,

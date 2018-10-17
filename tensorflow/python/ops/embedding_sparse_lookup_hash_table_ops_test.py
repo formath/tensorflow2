@@ -5,25 +5,25 @@ from tensorflow.python.ops import data_flow_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import embedding_ops
-from tensorflow.contrib.lookup import lookup_ops
+import tensorflow.contrib.lookup as lookup_op
 
 init_op_list = []
 
-emb_table = lookup_ops.PartitionedMutableHashTable(tf.int64,
+emb_table = lookup_op.PartitionedMutableHashTable(tf.int64,
                                                    tf.float32,
                                                    [0.0, 0.0, 0.0],
                                                    shard_num=2,
                                                    name="sparse_id_embedding",
                                                    checkpoint=True,
                                                    trainable=True)
-#emb_table = lookup_ops.MutableHashTable(tf.int64,
+#emb_table = lookup_op.MutableHashTable(tf.int64,
 #                            tf.float32,
 #                            [0.0, 0.0, 0.0],
 #                            name="sparse_id_embedding",
 #                            checkpoint=True)
 #tf.add_to_collections([ops.GraphKeys.TRAINABLE_RESOURCE_VARIABLES], emb_table)
 
-count_table = lookup_ops.PartitionedMutableHashTable(tf.int64,
+count_table = lookup_op.PartitionedMutableHashTable(tf.int64,
                                                      tf.int64,
                                                      0,
                                                      shard_num=2,

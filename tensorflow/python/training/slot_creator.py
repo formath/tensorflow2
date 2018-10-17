@@ -52,6 +52,7 @@ from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops import variables
 from tensorflow.python.training import distribution_strategy_context
+#import tensorflow.contrib.lookup as lookup
 
 def _is_hash_table(var):
   return hasattr(var, "_table_ref")
@@ -186,20 +187,19 @@ def create_zeros_slot(primary, name, dtype=None, colocate_with_primary=True):
       dtype = primary.value_dtype.base_dtype
     else:
       dtype = primary.dtype
+  import tensorflow.contrib.lookup as lookup
   if _is_hash_table(primary):
-    import tensorflow
-    from tensorflow.contrib.lookup import lookup_ops
     if colocate_with_primary:
       distribution_strategy = (
           distribution_strategy_context.get_distribution_strategy())
       with distribution_strategy.colocate_vars_with(primary._table_ref):
         default_value = array_ops.zeros(array_ops.size(primary._default_value))
-        new_slot_variable = lookup_ops.MutableHashTable(
+        new_slot_variable = lookup.MutableHashTable(
             dtypes.int64, dtype, default_value, None, "mutable_hash_table_for_%s" % name)
         return new_slot_variable
     else:
       default_value = array_ops.zeros(array_ops.size(primary._default_value))
-      new_slot_variable = lookup_ops.MutableHashTable(
+      new_slot_variable = lookup.MutableHashTable(
             dtypes.int64, dtype, default_value, None, "mutable_hash_table_for_%s" % name)
       return new_slot_variable
   slot_shape = primary.get_shape()

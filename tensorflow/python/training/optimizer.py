@@ -40,7 +40,7 @@ from tensorflow.python.training import slot_creator
 from tensorflow.python.training.checkpointable import base as checkpointable
 from tensorflow.python.util import nest
 from tensorflow.python.util.tf_export import tf_export
-#from tensorflow.contrib.lookup import lookup_ops
+#import tensorflow.contrib.lookup as lookup
 
 
 def get_filtered_grad_fn(grad_fn):
@@ -221,9 +221,8 @@ def _get_processor(v):
       v, resource_variable_ops.ResourceVariable) and not v._in_graph_mode:  # pylint: disable=protected-access
     # True if and only if `v` was initialized eagerly.
     return _DenseResourceVariableProcessor(v)
-  #from tensorflow.contrib.lookup import lookup_ops
-  #if isinstance(v, lookup_ops.MutableHashTable):
-  if _is_hash_table(v):
+  import tensorflow.contrib.lookup as lookup
+  if isinstance(v, lookup.MutableHashTable):
     return _MutableHashTableProcessor(v)
   if v.op.type == "VarHandleOp":
     return _DenseResourceVariableProcessor(v)

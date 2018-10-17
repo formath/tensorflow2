@@ -41,8 +41,7 @@ from tensorflow.python.ops import sparse_ops
 from tensorflow.python.ops import variables
 from tensorflow.python.platform import tf_logging as logging
 from tensorflow.python.util.tf_export import tf_export
-#from tensorflow.contrib.lookup import MutableHashTable
-#from tensorflow.contrib.lookup import PartitionedMutableHashTable
+#import tensorflow.contrib.lookup as lookup
 
 def _clip(params, ids, max_norm):
   """Helper function for _embedding_lookup_and_transform.
@@ -597,9 +596,10 @@ def embedding_lookup_sparse_with_hash_table(
     combiner = "sum"
   if combiner not in ("mean", "sqrtn", "sum"):
     raise ValueError("combiner must be one of 'mean', 'sqrtn' or 'sum'")
-  #if not (isinstance(emb_table, PartitionedMutableHashTable) or
-  #   isinstance(emb_table, MutableHashTable)):
-  #  raise TypeError("emb_table must be MutableHashTable or PartitionedMutableHashTable")
+  import tensorflow.contrib.lookup as lookup
+  if not (isinstance(emb_table, lookup.PartitionedMutableHashTable) or
+     isinstance(emb_table, lookup.MutableHashTable)):
+    raise TypeError("emb_table must be MutableHashTable or PartitionedMutableHashTable")
   if not isinstance(sp_ids, sparse_tensor.SparseTensor):
     raise TypeError("sp_ids must be SparseTensor")
   ignore_weights = sp_weights is None
