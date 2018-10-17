@@ -728,7 +728,6 @@ def _embedding_lookup_with_hash_table(emb_table,
     else:
       table_contain_mask = emb_table.contain(ids)
       ids_not_contain = array_ops.boolean_mask(gen_array_ops.reshape(ids, shape=(-1, 1)), gen_math_ops.logical_not(table_contain_mask))
-      from tensorflow.contrib.lookup import lookup_ops
       table_insert_op = control_flow_ops.cond(array_ops.size(ids_not_contain) > 0,
         lambda: emb_table.insert(ids_not_contain,
                                  initializer(array_ops.concat([[array_ops.size(ids_not_contain)], array_ops.shape(emb_table._default_value)], 0))),
