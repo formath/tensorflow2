@@ -187,6 +187,7 @@ def create_zeros_slot(primary, name, dtype=None, colocate_with_primary=True):
     else:
       dtype = primary.dtype
   if _is_hash_table(primary):
+    import tensorflow
     from tensorflow.contrib.lookup import lookup_ops
     if colocate_with_primary:
       distribution_strategy = (

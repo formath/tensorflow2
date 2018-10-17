@@ -221,8 +221,9 @@ def _get_processor(v):
       v, resource_variable_ops.ResourceVariable) and not v._in_graph_mode:  # pylint: disable=protected-access
     # True if and only if `v` was initialized eagerly.
     return _DenseResourceVariableProcessor(v)
-  from tensorflow.contrib.lookup import lookup_ops
-  if isinstance(v, lookup_ops.MutableHashTable):
+  #from tensorflow.contrib.lookup import lookup_ops
+  #if isinstance(v, lookup_ops.MutableHashTable):
+  if _is_hash_table(v):
     return _MutableHashTableProcessor(v)
   if v.op.type == "VarHandleOp":
     return _DenseResourceVariableProcessor(v)
