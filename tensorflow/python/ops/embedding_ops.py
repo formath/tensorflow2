@@ -351,9 +351,8 @@ def embedding_lookup_with_hash_table(
     TypeError: If ids is not a Tensor.
     ValueError: If combiner is not one of {"mean", "sqrtn", "sum"}.
   """
-  from tensorflow.contrib.lookup import lookup_ops
-  if not (isinstance(emb_table, lookup_ops.PartitionedMutableHashTable) or
-     isinstance(emb_table, lookup_ops.MutableHashTable)):
+  if not (isinstance(emb_table, tensorflow.contrib.lookup.PartitionedMutableHashTable) or
+     isinstance(emb_table, tensorflow.contrib.lookup.MutableHashTable)):
     raise TypeError("emb_table must be MutableHashTable or PartitionedMutableHashTable")
 
   with ops.name_scope(name, "embedding_lookup_with_hash_table",
