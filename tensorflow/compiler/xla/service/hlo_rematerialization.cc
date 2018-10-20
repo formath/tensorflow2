@@ -20,6 +20,8 @@ limitations under the License.
 #include <set>
 #include <string>
 
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
@@ -27,15 +29,14 @@ limitations under the License.
 #include "tensorflow/compiler/xla/map_util.h"
 #include "tensorflow/compiler/xla/primitive_util.h"
 #include "tensorflow/compiler/xla/service/buffer_value.h"
-#include "tensorflow/compiler/xla/service/copy_insertion.h"
 #include "tensorflow/compiler/xla/service/flatten_call_graph.h"
 #include "tensorflow/compiler/xla/service/hlo_computation.h"
 #include "tensorflow/compiler/xla/service/hlo_dce.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
+#include "tensorflow/compiler/xla/service/hlo_memory_scheduler.h"
 #include "tensorflow/compiler/xla/service/hlo_module.h"
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
 #include "tensorflow/compiler/xla/service/hlo_ordering.h"
-#include "tensorflow/compiler/xla/service/hlo_scheduling.h"
 #include "tensorflow/compiler/xla/service/logical_buffer.h"
 #include "tensorflow/compiler/xla/status_macros.h"
 #include "tensorflow/compiler/xla/statusor.h"
@@ -76,7 +77,7 @@ bool IsRematerializable(const HloInstruction* instruction) {
 // cache before, and eventually calling the IsRematerializable() API.
 bool CanBeRematerialized(
     const HloInstruction* instruction,
-    tensorflow::gtl::FlatMap<const HloInstruction*, bool>* remat_able) {
+    absl::flat_hash_map<const HloInstruction*, bool>* remat_able) {
   auto it = remat_able->find(instruction);
   if (it != remat_able->end()) {
     return it->second;
@@ -269,7 +270,7 @@ class InstructionList {
   Item* first_;
 
   // Item for each instruction.
-  tensorflow::gtl::FlatMap<const HloInstruction*, Item*> item_map_;
+  absl::flat_hash_map<const HloInstruction*, Item*> item_map_;
 };
 
 // Return the items which use the given LogicalBuffer. Sets
@@ -504,7 +505,7 @@ MemoryUsageTracker::MemoryUsageTracker(
   PointsToSet::BufferSet live_out_set =
       points_to_analysis.GetPointsToSet(computation_->root_instruction())
           .CreateFlattenedSet();
-  tensorflow::gtl::FlatMap<const LogicalBuffer*, BufferId>
+  absl::flat_hash_map<const LogicalBuffer*, BufferId>
       logical_buffer_to_buffer_id;
 
   for (auto* item = instruction_list_.first(); item != nullptr;
@@ -855,7 +856,7 @@ int64 RematerializationCost(const HloInstruction* instruction,
 Item* PickRematerializationCandidate(
     const MemoryUsageTracker& memory_tracker,
     const InstructionList& instruction_list, int64 memory_limit_bytes,
-    tensorflow::gtl::FlatMap<const HloInstruction*, bool>* remat_able) {
+    absl::flat_hash_map<const HloInstruction*, bool>* remat_able) {
   Item* best_item = nullptr;
   int64 best_cost = 0;
 
@@ -981,10 +982,10 @@ StatusOr<bool> HloRematerialization::RematerializeComputation(
   // rematerialization is essentially a move). If the next rematerialization of
   // the instruction is also a move then the rematerialization is added to the
   // blacklist.
-  tensorflow::gtl::FlatSet<const HloInstruction*> remat_move_instructions;
+  absl::flat_hash_set<const HloInstruction*> remat_move_instructions;
 
   // The map from instructions to their rematerializable status.
-  tensorflow::gtl::FlatMap<const HloInstruction*, bool> remat_able;
+  absl::flat_hash_map<const HloInstruction*, bool> remat_able;
 
   // The peak memory of the computation at any point in the instruction
   // sequence.
@@ -1194,51 +1195,18 @@ StatusOr<bool> HloRematerialization::RematerializeComputation(
   return changed;
 }
 
-StatusOr<bool> HloRematerialization::Run(HloModule* module,
-                                         HloSchedule* schedule,
-                                         int64 memory_limit_bytes,
-                                         RematerializationSizes* sizes,
-                                         CopyInsertion* copy_insertion) {
-  // The schedule is constructed entirely by this method.
-  TF_RET_CHECK(schedule->empty());
-
+StatusOr<bool> HloRematerialization::Run(HloModule* module) {
   VLOG(1) << "HloRematerialization() with memory limit of "
-          << HumanReadableNumBytes(memory_limit_bytes);
+          << HumanReadableNumBytes(memory_limit_bytes_);
   XLA_VLOG_LINES(3, "Before HloRematerialization:\n" + module->ToString());
 
-  // Create initial schedule of HLO instructions.
-  TF_ASSIGN_OR_RETURN(*schedule,
-                      ScheduleModule(*module,
-                                     [this](const BufferValue& buffer) {
-                                       return size_function_(buffer.shape());
-                                     },
-                                     scheduler_algorithm_));
-  if (copy_insertion) {
-    // We run a separate pass of copy elision here because the sequential
-    // ordering from the HLO schedule allows for more copies to be eliminated.
-    // TODO(b/80249101): Instead of a separate copy elision pass, use the
-    // ordering from the HLO schedule directly for copy insertion.
-    SequentialHloOrdering ordering(*schedule);
-    TF_RETURN_IF_ERROR(
-        copy_insertion->RemoveUnnecessaryCopies(ordering, module));
+  // Initialize pass object state.
+  computation_peak_memory_.clear();
+  rematerialized_computations_.clear();
+  instructions_rematerialized_ = 0;
+  net_instructions_added_ = 0;
 
-    // RemoveUnnecessaryCopies only considers interference when determining
-    // whether it is legal to remove a copy. However, copies in the graph may be
-    // necessary for other reason such as preventing a constant from being live
-    // out of the graph. So run AddSpecialCaseCopies to re-insert these copies.
-    // TODO(b/80249101): Break copy insertion into several passes and run each
-    // one once in the regular HLO pipeline.
-    TF_RETURN_IF_ERROR(copy_insertion->AddSpecialCaseCopies(module));
-
-    // The passes above can add and remove copies, update the schedule to
-    // account for these transformations. Newly added instructions will be
-    // placed ASAP in the schedule.
-    TF_RETURN_IF_ERROR(schedule->Update());
-
-    TF_DCHECK_OK(copy_insertion->VerifyNoLiveRangeInterference(
-        SequentialHloOrdering(*schedule), module));
-  }
-
+  TF_RET_CHECK(module->has_schedule());
   TF_ASSIGN_OR_RETURN(points_to_analysis_, TuplePointsToAnalysis::Run(module));
 
   // Adjust memory limit to account for the output of the entry
@@ -1247,14 +1215,14 @@ StatusOr<bool> HloRematerialization::Run(HloModule* module,
   // by the caller.
   int64 module_output_size = 0;
   ShapeUtil::ForEachSubshape(
-      module->entry_computation()->root_instruction()->shape(),
+      module->result_shape(),
       [&module_output_size, this](const Shape& subshape,
                                   const ShapeIndex& /*index*/) {
         module_output_size += size_function_(subshape);
       });
 
   const int64 adjusted_memory_limit_bytes =
-      memory_limit_bytes - module_output_size;
+      memory_limit_bytes_ - module_output_size;
   VLOG(1) << "Adjusted memory limit accounting for output ("
           << HumanReadableNumBytes(module_output_size)
           << "): " << HumanReadableNumBytes(adjusted_memory_limit_bytes);
@@ -1263,13 +1231,14 @@ StatusOr<bool> HloRematerialization::Run(HloModule* module,
   // sequential context.
   call_graph_ = CallGraph::Build(module);
   TF_RETURN_IF_ERROR(call_graph_->VisitNodes(
-      [this, schedule](const CallGraphNode& node) -> Status {
+      [this, module](const CallGraphNode& node) -> Status {
         if (node.context() == CallContext::kSequential) {
           TF_ASSIGN_OR_RETURN(
               computation_peak_memory_[node.computation()],
-              ComputePeakMemory(
-                  node.computation(),
-                  schedule->sequence(node.computation()).instructions()));
+              ComputePeakMemory(node.computation(),
+                                module->schedule()
+                                    .sequence(node.computation())
+                                    .instructions()));
         }
         return Status::OK();
       },
@@ -1287,9 +1256,10 @@ StatusOr<bool> HloRematerialization::Run(HloModule* module,
 
   // Subcomputations called by the entry computation will also be
   // rematerialized.
-  TF_ASSIGN_OR_RETURN(bool changed, RematerializeComputation(
-                                        module->entry_computation(), schedule,
-                                        adjusted_memory_limit_bytes));
+  TF_ASSIGN_OR_RETURN(
+      bool changed,
+      RematerializeComputation(module->entry_computation(), &module->schedule(),
+                               adjusted_memory_limit_bytes));
 
   // Rematerialization can introduce dead code. This occurs if all uses of an
   // instruction are replaced with rematerializations of the instruction.
@@ -1298,7 +1268,7 @@ StatusOr<bool> HloRematerialization::Run(HloModule* module,
 
   // After DCE, the module sequence may include instructions which no longer
   // exist.
-  TF_RETURN_IF_ERROR(schedule->Update());
+  TF_RETURN_IF_ERROR(module->schedule().Update());
   VLOG(1) << "Rematerialized " << instructions_rematerialized_
           << " instructions in module " << module->name() << "; "
           << net_instructions_added_ << " net instructions added";
@@ -1315,32 +1285,22 @@ StatusOr<bool> HloRematerialization::Run(HloModule* module,
           << HumanReadableNumBytes(reduced_peak_memory) << " ("
           << reduced_peak_memory << " bytes)";
 
-  if (sizes != nullptr) {
-    sizes->before_bytes = before_peak_memory;
-    sizes->after_bytes = current_peak_memory;
+  if (sizes_ != nullptr) {
+    sizes_->before_bytes = before_peak_memory;
+    sizes_->after_bytes = current_peak_memory;
   }
 
   XLA_VLOG_LINES(3, "After HloRematerialization:\n" + module->ToString());
 
-  if (current_peak_memory > memory_limit_bytes) {
+  if (current_peak_memory > memory_limit_bytes_) {
     LOG(WARNING) << absl::StrFormat(
         "Can't reduce memory use below %s (%d bytes) by rematerialization; "
         "only reduced to %s (%d bytes)",
-        HumanReadableNumBytes(memory_limit_bytes), memory_limit_bytes,
+        HumanReadableNumBytes(memory_limit_bytes_), memory_limit_bytes_,
         HumanReadableNumBytes(current_peak_memory), current_peak_memory);
   }
 
   return changed;
-}
-
-/* static */ StatusOr<bool> HloRematerialization::RematerializeAndSchedule(
-    const HloRematerialization::ShapeSizeFunction& size_function,
-    int64 memory_limit_bytes, HloModule* hlo_module,
-    MemorySchedulerAlgorithm scheduler_algorithm, HloSchedule* schedule,
-    RematerializationSizes* sizes, CopyInsertion* copy_insertion) {
-  HloRematerialization remat(scheduler_algorithm, size_function);
-  return remat.Run(hlo_module, schedule, memory_limit_bytes, sizes,
-                   copy_insertion);
 }
 
 }  // namespace xla

@@ -16,6 +16,8 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/indexed_array_analysis.h"
 
 #include "absl/algorithm/container.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
@@ -23,7 +25,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/map_util.h"
 #include "tensorflow/compiler/xla/service/hlo_evaluator.h"
 #include "tensorflow/compiler/xla/util.h"
-#include "tensorflow/core/lib/gtl/flatset.h"
 
 namespace xla {
 namespace gtl = ::tensorflow::gtl;
@@ -95,7 +96,7 @@ Status IndexedArrayAnalysis::TraverseAndPopulateCache(
   absl::InlinedVector<const HloInstruction*, 4> stack;
 
   enum DfsState { kDiscovered, kVisited };
-  gtl::FlatMap<const HloInstruction*, DfsState> dfs_state_map;
+  absl::flat_hash_map<const HloInstruction*, DfsState> dfs_state_map;
 
   stack.push_back(root);
   InsertOrDie(&dfs_state_map, root, kDiscovered);
@@ -918,7 +919,7 @@ IndexedArrayAnalysis::ComputeArrayForElementwiseBinaryOp(HloOpcode opcode,
   // inner_broadcast_result is the Broadcast'(Const0) bit in
   // BinaryOp(Broadcast'(Const0), Const1)
   TF_ASSIGN_OR_RETURN(
-      std::unique_ptr<Literal> inner_broadcast_result,
+      Literal inner_broadcast_result,
       broadcast_const_operand->literal().Broadcast(
           scalar_indexed_const->source()->shape(), new_inner_broadcast_dims));
 
@@ -928,12 +929,12 @@ IndexedArrayAnalysis::ComputeArrayForElementwiseBinaryOp(HloOpcode opcode,
     TF_ASSIGN_OR_RETURN(
         literal_for_new_source,
         TakeOwnership(HloEvaluator{}.EvaluateElementwiseBinaryOp(
-            opcode, scalar_indexed_const->literal(), *inner_broadcast_result)));
+            opcode, scalar_indexed_const->literal(), inner_broadcast_result)));
   } else {
     TF_ASSIGN_OR_RETURN(
         literal_for_new_source,
         TakeOwnership(HloEvaluator{}.EvaluateElementwiseBinaryOp(
-            opcode, *inner_broadcast_result, scalar_indexed_const->literal())));
+            opcode, inner_broadcast_result, scalar_indexed_const->literal())));
   }
 
   ConstantArray* new_source = Construct<ConstantArray>(literal_for_new_source);

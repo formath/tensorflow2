@@ -19,6 +19,7 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "tensorflow/compiler/xla/literal.h"
 #include "tensorflow/compiler/xla/literal_util.h"
+#include "tensorflow/compiler/xla/service/hlo_module.h"
 #include "tensorflow/compiler/xla/service/shape_inference.h"
 #include "tensorflow/compiler/xla/util.h"
 
@@ -201,6 +202,44 @@ StatusOr<HloInstruction*> MakeMapHlo(absl::Span<HloInstruction* const> operands,
       HloInstruction::CreateMap(map_shape, operands, map_computation));
 }
 
+StatusOr<HloInstruction*> MakeReduceHlo(HloInstruction* operand,
+                                        HloInstruction* init_value,
+                                        HloOpcode binary_opcode,
+                                        HloModule* module) {
+  DCHECK_NE(nullptr, module);
+  std::vector<int64> all_dims(ShapeUtil::Rank(operand->shape()));
+  std::iota(all_dims.begin(), all_dims.end(), 0);
+
+  auto scalar_shape = ShapeUtil::MakeShape(operand->shape().element_type(), {});
+  HloComputation* reduce_computation;
+  {
+    HloComputation::Builder b(operand->name() + ".reduce_sub_computation");
+    auto lhs = b.AddInstruction(
+        HloInstruction::CreateParameter(0, scalar_shape, "lhs"));
+    auto rhs = b.AddInstruction(
+        HloInstruction::CreateParameter(1, scalar_shape, "rhs"));
+    b.AddInstruction(
+        HloInstruction::CreateBinary(scalar_shape, binary_opcode, lhs, rhs));
+    reduce_computation = module->AddEmbeddedComputation(b.Build());
+  }
+
+  return operand->parent()->AddInstruction(HloInstruction::CreateReduce(
+      scalar_shape, operand, init_value, all_dims, reduce_computation));
+}
+
+StatusOr<HloInstruction*> MakeSelectHlo(HloInstruction* pred,
+                                        HloInstruction* on_true,
+                                        HloInstruction* on_false) {
+  HloComputation* computation = pred->parent();
+  DCHECK_EQ(computation, on_true->parent());
+  DCHECK_EQ(computation, on_false->parent());
+  TF_ASSIGN_OR_RETURN(Shape select_shape,
+                      ShapeInference::InferTernaryOpShape(
+                          HloOpcode::kSelect, pred, on_true, on_false));
+  return computation->AddInstruction(HloInstruction::CreateTernary(
+      select_shape, HloOpcode::kSelect, pred, on_true, on_false));
+}
+
 StatusOr<HloInstruction*> CollapseFirstNDims(HloInstruction* operand, int64 n) {
   CHECK_GT(n, 0);
 
@@ -321,18 +360,17 @@ StatusOr<HloInstruction*> PadVectorWithZeros(HloInstruction* operand,
   padding_config_dim.set_edge_padding_high(zeros_to_append);
   *padding_config.add_dimensions() = padding_config_dim;
 
-  HloInstruction* zero = computation->AddInstruction(
-      HloInstruction::CreateConstant(absl::make_unique<Literal>(
-          LiteralUtil::Zero(operand->shape().element_type()))));
+  HloInstruction* zero =
+      computation->AddInstruction(HloInstruction::CreateConstant(
+          LiteralUtil::Zero(operand->shape().element_type())));
   return MakePadHlo(operand, zero, padding_config);
 }
 
 StatusOr<HloInstruction*> BroadcastZeros(
     HloComputation* computation, PrimitiveType element_type,
     absl::Span<const int64> broadcast_dimensions) {
-  HloInstruction* zero =
-      computation->AddInstruction(HloInstruction::CreateConstant(
-          absl::make_unique<Literal>(LiteralUtil::Zero(element_type))));
+  HloInstruction* zero = computation->AddInstruction(
+      HloInstruction::CreateConstant(LiteralUtil::Zero(element_type)));
   return MakeBroadcastHlo(zero, /*broadcast_dimensions=*/{},
                           /*result_shape_bounds=*/broadcast_dimensions);
 }

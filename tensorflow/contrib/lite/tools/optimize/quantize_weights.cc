@@ -141,6 +141,7 @@ bool IsHybridEvaluationOp(const OperatorT* op, const BuiltinOperator& op_code) {
       op_code == BuiltinOperator_CONV_2D || op_code == BuiltinOperator_SVDF ||
       op_code == BuiltinOperator_EMBEDDING_LOOKUP ||
       op_code == BuiltinOperator_RNN ||
+      op_code == BuiltinOperator_BIDIRECTIONAL_SEQUENCE_LSTM ||
       op_code == BuiltinOperator_BIDIRECTIONAL_SEQUENCE_RNN ||
       op_code == BuiltinOperator_UNIDIRECTIONAL_SEQUENCE_LSTM ||
       op_code == BuiltinOperator_UNIDIRECTIONAL_SEQUENCE_RNN) {
@@ -202,6 +203,14 @@ std::vector<TensorInfo> GetQuantizableTensorsFromOperator(
       // If one of the weights isn't quantized, then we cannot use the hybrid
       // kernel for this operation, since it expects everything to be quantized.
       eval_hybrid = false;
+      continue;
+    }
+
+    // Some tensors may have a null buffer vector, indicating an intermediate
+    // array.
+    if (model->buffers[tensor->buffer]->data.data() == nullptr) {
+      LOG(INFO) << "Skipping quantization of tensor " << tensor->name
+                << " because it has no allocated buffer.";
       continue;
     }
 

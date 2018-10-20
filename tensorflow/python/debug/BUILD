@@ -18,6 +18,7 @@ exports_files(["LICENSE"])
 
 load("//tensorflow:tensorflow.bzl", "cuda_py_test")
 load("//tensorflow:tensorflow.bzl", "py_test")
+load("//tensorflow:tensorflow.bzl", "py_binary")
 load("//tensorflow:tensorflow.bzl", "if_not_windows")
 
 py_library(
@@ -265,7 +266,6 @@ py_library(
     name = "stepper_cli",
     srcs = ["cli/stepper_cli.py"],
     srcs_version = "PY2AND3",
-    tags = ["notsan"],
     deps = [
         ":cli_shared",
         ":command_parser",
@@ -525,7 +525,6 @@ cuda_py_test(
         "//tensorflow/python:training",
         "//tensorflow/python:variables",
     ],
-    tags = ["notsan"],
 )
 
 py_test(
@@ -612,7 +611,6 @@ cuda_py_test(
         "//tensorflow/python:training",
         "//tensorflow/python:variables",
     ],
-    tags = ["notsan"],
 )
 
 py_test(
@@ -1058,7 +1056,6 @@ py_test(
     size = "small",
     srcs = ["wrappers/dumping_wrapper_test.py"],
     srcs_version = "PY2AND3",
-    tags = ["notsan"],
     deps = [
         ":debug_data",
         ":dumping_wrapper",
@@ -1133,5 +1130,4 @@ sh_test(
         ":debug_tflearn_iris",
         ":offline_analyzer",
     ],
-    tags = ["notsan"],
 )

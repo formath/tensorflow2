@@ -33,6 +33,7 @@ limitations under the License.
 #include "tensorflow/core/distributed_runtime/eager/eager_client.h"
 #include "tensorflow/core/distributed_runtime/server_lib.h"
 #endif
+#include "tensorflow/core/framework/log_memory.h"
 #include "tensorflow/core/framework/rendezvous.h"
 #include "tensorflow/core/lib/core/stringpiece.h"
 #include "tensorflow/core/lib/core/threadpool.h"
@@ -130,6 +131,8 @@ class EagerContext {
 
   Device* HostCPU() { return devices_[0]; }
 
+  GraphCollector* GetGraphCollector() { return &graph_collector_; }
+
   uint64 NextId() { return executor_.NextId(); }
 
   void ExecutorAdd(EagerNode* node) { executor_.Add(node); }
@@ -141,6 +144,7 @@ class EagerContext {
   void AddKernelToCache(Fprint128 cache_key, KernelAndDevice* kernel);
 
   bool LogDevicePlacement() { return log_device_placement_; }
+  bool LogMemory() { return log_memory_; }
 
   Rendezvous* GetRendezvous() { return rendezvous_; }
 
@@ -200,6 +204,7 @@ class EagerContext {
   // EagerService.SendTensor RPC. If false, _Send/_Recv ops should be used
   // instead (which in-turn use WorkerService.RecvTensor RPCs).
   bool UseSendTensorRPC() { return use_send_tensor_rpc_; }
+  bool PinSmallOpsToCPU() { return pin_small_ops_to_cpu_; }
 
  private:
   void InitDeviceMapAndAsync();
@@ -246,6 +251,7 @@ class EagerContext {
   std::atomic<bool> should_store_metadata_{false};
   mutex metadata_mu_;
   RunMetadata run_metadata_ GUARDED_BY(metadata_mu_);
+  GraphCollector graph_collector_;
   const bool log_device_placement_;
   // EagerExecutor for async execution.
   EagerExecutor executor_;
@@ -260,6 +266,8 @@ class EagerContext {
   mutable mutex async_map_mu_;
   std::unordered_map<std::thread::id, bool> thread_local_async_
       GUARDED_BY(async_map_mu_);
+
+  const bool log_memory_;
 
   Env* const env_;
 
@@ -289,6 +297,7 @@ class EagerContext {
 #endif
 
   bool use_send_tensor_rpc_;
+  const bool pin_small_ops_to_cpu_;
 };
 
 }  // namespace tensorflow

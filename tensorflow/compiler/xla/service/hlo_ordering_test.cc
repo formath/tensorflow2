@@ -24,7 +24,6 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
 #include "tensorflow/compiler/xla/service/hlo_parser.h"
 #include "tensorflow/compiler/xla/service/hlo_schedule.h"
-#include "tensorflow/compiler/xla/service/hlo_scheduling.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/tests/hlo_test_base.h"
 #include "tensorflow/compiler/xla/types.h"
@@ -173,6 +172,26 @@ TEST_F(HloOrderingTest, InstructionsInWhileComputations) {
   EXPECT_TRUE(ordering.ExecutesBefore(convert, negate));
 
   EXPECT_FALSE(ordering.ExecutesBefore(body_param, cond_param));
+}
+
+TEST_F(HloOrderingTest, ParametersDefinedBeforeOthers) {
+  // Entry parameter should always be defined before other instruction.
+  auto module = CreateNewModule();
+  const Shape scalar_shape = ShapeUtil::MakeShape(xla::F32, {});
+  auto builder = HloComputation::Builder(TestName());
+  auto constant = builder.AddInstruction(
+      HloInstruction::CreateConstant(LiteralUtil::CreateR0<float>(1.0)));
+  auto param = builder.AddInstruction(
+      HloInstruction::CreateParameter(0, scalar_shape, "param"));
+  module->AddEntryComputation(builder.Build());
+  TF_ASSERT_OK_AND_ASSIGN(auto dataflow,
+                          HloDataflowAnalysis::Run(*module, /*ssa_form=*/true));
+
+  DependencyHloOrdering ordering(module.get());
+  EXPECT_TRUE(ordering.IsDefinedBefore(dataflow->GetValueDefinedAt(param),
+                                       dataflow->GetValueDefinedAt(constant)));
+  EXPECT_TRUE(!ordering.IsDefinedBefore(dataflow->GetValueDefinedAt(constant),
+                                        dataflow->GetValueDefinedAt(param)));
 }
 
 TEST_F(HloOrderingTest, ValuesInWhileComputations) {

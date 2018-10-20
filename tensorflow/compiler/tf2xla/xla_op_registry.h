@@ -22,7 +22,6 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
-#include "absl/strings/string_view.h"
 #include "tensorflow/core/common_runtime/device_factory.h"
 #include "tensorflow/core/common_runtime/local_device.h"
 #include "tensorflow/core/framework/device_base.h"
@@ -48,17 +47,18 @@ extern const char* const DEVICE_XLA_GPU;
 
 constexpr std::array<DataType, 4> kFloatTypes = {
     {DT_HALF, DT_FLOAT, DT_DOUBLE, DT_BFLOAT16}};
-constexpr std::array<DataType, 9> kNumericTypes = {
-    {DT_UINT32, DT_UINT64, DT_INT32, DT_INT64, DT_HALF, DT_FLOAT, DT_DOUBLE,
-     DT_COMPLEX64, DT_BFLOAT16}};
+constexpr std::array<DataType, 11> kNumericTypes = {
+    {DT_UINT8, DT_UINT32, DT_UINT64, DT_INT8, DT_INT32, DT_INT64, DT_HALF,
+     DT_FLOAT, DT_DOUBLE, DT_COMPLEX64, DT_BFLOAT16}};
 
-constexpr std::array<DataType, 9> kCpuAllTypes = {
-    {DT_UINT32, DT_UINT64, DT_INT32, DT_INT64, DT_HALF, DT_FLOAT, DT_DOUBLE,
-     DT_COMPLEX64, DT_BOOL}};
+constexpr std::array<DataType, 14> kCpuAllTypes = {
+    {DT_UINT8, DT_QUINT8, DT_UINT32, DT_UINT64, DT_INT8, DT_QINT8, DT_INT32,
+     DT_QINT32, DT_INT64, DT_HALF, DT_FLOAT, DT_DOUBLE, DT_COMPLEX64, DT_BOOL}};
 
-constexpr std::array<DataType, 10> kGpuAllTypes = {
-    {DT_UINT32, DT_UINT64, DT_INT32, DT_INT64, DT_HALF, DT_FLOAT, DT_DOUBLE,
-     DT_COMPLEX64, DT_BOOL, DT_BFLOAT16}};
+constexpr std::array<DataType, 15> kGpuAllTypes = {
+    {DT_UINT8, DT_QUINT8, DT_UINT32, DT_UINT64, DT_INT8, DT_QINT8, DT_INT32,
+     DT_QINT32, DT_INT64, DT_HALF, DT_FLOAT, DT_DOUBLE, DT_COMPLEX64, DT_BOOL,
+     DT_BFLOAT16}};
 
 // Class that manages registrations of operators and devices for the XLA JIT.
 // Not thread-safe.
@@ -106,6 +106,7 @@ class XlaOpRegistry {
 
   // Registers `device_name` for XLA compilation, using information from
   // `registration`.
+  // Does nothing if a registration for `device_name` already exists.
   static void RegisterCompilationDevice(const string& device_name,
                                         const DeviceRegistration& registration);
 
@@ -136,6 +137,10 @@ class XlaOpRegistry {
   // if the op is not registered.
   static const std::unordered_set<string>* CompileTimeConstantInputs(
       const string& op);
+
+  // Returns true if `op` is a "metadata" op, one that only looks at the shapes
+  // of its operands and not their values.
+  static bool IsMetadataOp(const string& op);
 
  private:
   friend class XlaBackendRegistrar;
@@ -192,6 +197,10 @@ class XlaOpRegistry {
 
     // Names of arguments that must be compile-time constants.
     std::unordered_set<string> compile_time_constant_inputs;
+
+    // True if this is a "metadata" op, one that only looks at the shapes of its
+    // operands and not their values.
+    bool is_metadata_op = false;
 
     // Factory used to build OpKernels that perform symbolic execution.
     Factory factory;
@@ -255,7 +264,12 @@ class XlaOpRegistrationBuilder {
   XlaOpRegistrationBuilder& AllowResourceTypes();
 
   // Mark 'input_name' as an argument whose value must be known at compile-time.
-  XlaOpRegistrationBuilder& CompileTimeConstInput(absl::string_view input_name);
+  XlaOpRegistrationBuilder& CompileTimeConstantInput(
+      absl::string_view input_name);
+
+  // Mark this op as a "metadata" op, one that only looks at the shapes of its
+  // operands and not their values.
+  XlaOpRegistrationBuilder& IsMetadataOp();
 
   std::unique_ptr<XlaOpRegistry::OpRegistration> Build(
       XlaOpRegistry::Factory factory);

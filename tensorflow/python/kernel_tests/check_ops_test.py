@@ -33,6 +33,7 @@ from tensorflow.python.framework import sparse_tensor
 from tensorflow.python.framework import test_util
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import check_ops
+from tensorflow.python.ops import gradients
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import random_ops
 from tensorflow.python.platform import test
@@ -300,6 +301,30 @@ class AssertNoneEqualTest(test.TestCase):
       t2 = constant_op.constant([3, 4])
       x = check_ops.assert_none_equal(t1, t2)
       assert x is None
+
+  def test_error_message_eager(self):
+    # Note that the following three strings are regexes
+    expected_error_msg_full = r"""0.0, 1.0, 2.0, 3.0, 4.0, 5.0"""
+    expected_error_msg_default = r"""0.0, 1.0, 2.0, \.\.\."""
+    expected_error_msg_short = r"""0.0, 1.0, \.\.\."""
+    with context.eager_mode():
+      t = constant_op.constant(
+          np.array(range(6)), shape=[2, 3], dtype=np.float32)
+      with self.assertRaisesRegexp(errors.InvalidArgumentError,
+                                   expected_error_msg_full):
+        check_ops.assert_none_equal(
+            t, t, message="This is the error message.", summarize=10)
+      with self.assertRaisesRegexp(errors.InvalidArgumentError,
+                                   expected_error_msg_full):
+        check_ops.assert_none_equal(
+            t, t, message="This is the error message.", summarize=-1)
+      with self.assertRaisesRegexp(errors.InvalidArgumentError,
+                                   expected_error_msg_default):
+        check_ops.assert_none_equal(t, t, message="This is the error message.")
+      with self.assertRaisesRegexp(errors.InvalidArgumentError,
+                                   expected_error_msg_short):
+        check_ops.assert_none_equal(
+            t, t, message="This is the error message.", summarize=2)
 
 
 class AssertAllCloseTest(test.TestCase):
@@ -784,7 +809,7 @@ class EnsureShapeTest(test.TestCase):
     derived = math_ops.divide(placeholder, 3, name="MyDivide")
     derived = check_ops.ensure_shape(derived, (3, 3, 3))
     feed_val = [[1], [2]]
-    with self.test_session() as sess:
+    with self.cached_session() as sess:
       with self.assertRaisesWithPredicateMatch(
           errors.InvalidArgumentError,
           r"Shape of tensor MyDivide \[2,1\] is not compatible with "
@@ -796,7 +821,7 @@ class EnsureShapeTest(test.TestCase):
     derived = placeholder / 3
     derived = check_ops.ensure_shape(derived, (None, None, 3))
     feed_val = [[1], [2]]
-    with self.test_session() as sess:
+    with self.cached_session() as sess:
       with self.assertRaisesWithPredicateMatch(
           errors.InvalidArgumentError,
           r"Shape of tensor [A-Za-z_]* \[2,1\] is not compatible with "
@@ -808,7 +833,7 @@ class EnsureShapeTest(test.TestCase):
     derived = placeholder / 3
     derived = check_ops.ensure_shape(derived, (2, 1))
     feed_val = [[1], [2]]
-    with self.test_session() as sess:
+    with self.cached_session() as sess:
       sess.run(derived, feed_dict={placeholder: feed_val})
 
   def testEnsuresDynamicShape_WithUnknownDims(self):
@@ -816,8 +841,20 @@ class EnsureShapeTest(test.TestCase):
     derived = placeholder / 3
     derived = check_ops.ensure_shape(derived, (None, None))
     feed_val = [[1], [2]]
-    with self.test_session() as sess:
+    with self.cached_session() as sess:
       sess.run(derived, feed_dict={placeholder: feed_val})
+
+  def testGradient(self):
+    placeholder = array_ops.placeholder(dtypes.float32)
+    derived = check_ops.ensure_shape(placeholder, (None, None))
+    gradient = gradients.gradients(derived, placeholder)
+
+    feed_val = [[4.0], [-1.0]]
+    with self.cached_session() as sess:
+      gradient_values, = sess.run(gradient, feed_dict={placeholder: feed_val})
+
+    expected = [[1.0], [1.0]]
+    self.assertAllEqual(gradient_values, expected)
 
 
 class EnsureShapeBenchmark(test.Benchmark):
