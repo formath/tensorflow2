@@ -16,7 +16,7 @@ limitations under the License.
 #include <string.h>
 #include <algorithm>
 
-#include "tensorflow/contrib/lite/builtin_op_data.h"
+#include "tensorflow/contrib/lite/c/builtin_op_data.h"
 #include "tensorflow/contrib/lite/kernels/activation_functor.h"
 #include "tensorflow/contrib/lite/kernels/internal/round.h"
 #include "tensorflow/contrib/lite/kernels/op_macros.h"
@@ -55,7 +55,7 @@ void PortableSymmetricQuantizeFloats(const float* values, const int size,
     return;
   }
   *scaling_factor = range / kScale;
-  const float scaling_factor_inv = 1.0f / *scaling_factor;
+  const float scaling_factor_inv = kScale / range;
   for (int i = 0; i < size; ++i) {
     const int32_t quantized_value =
         static_cast<int32_t>(TfLiteRound(values[i] * scaling_factor_inv));
