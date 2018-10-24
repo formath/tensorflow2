@@ -397,8 +397,8 @@ class Function(object):
       # pylint: enable=protected-access
       # Compute the gradients using the side outputs
       side_outputs = op.outputs[num_inference_outputs:]
-      return self._backward_graph_function(
-          *(list(doutputs[:num_inference_outputs]) + list(side_outputs)))
+      args = list(doutputs[:num_inference_outputs]) + list(side_outputs)
+      return self._backward_graph_function(*[a for a in args if a is not None])
 
   @property
   def name(self):
@@ -471,12 +471,14 @@ class Function(object):
     backwards_graph = func_graph_module.FuncGraph(
         _backward_name(self._func_graph.name))
     forward_function_name = _forward_name(self._func_graph.name)
+    outputs = [x for x in self._func_graph.outputs
+               if gradients_impl.IsTrainable(x)]
     with backwards_graph.as_default():
       gradients_wrt_outputs = [
-          graph_placeholder(x.dtype, x.shape) for x in self._func_graph.outputs
+          graph_placeholder(x.dtype, x.shape) for x in outputs
       ]
       gradients_wrt_inputs = gradients_impl._GradientsHelper(  # pylint: disable=protected-access
-          self._func_graph.outputs,
+          outputs,
           self._func_graph.inputs,
           grad_ys=gradients_wrt_outputs,
           src_graph=self._func_graph,
@@ -542,9 +544,13 @@ class Function(object):
     # `side_outputs` are the intermediate Tensors that were added as outputs to
     # the forward graph function so that we can compute its gradient.
     real_outputs = outputs[:self._num_outputs]
+    skip_positions = [i for i, t in enumerate(real_outputs)
+                      if not gradients_impl.IsTrainable(t)]
     side_outputs = outputs[self._num_outputs:]
 
     def backward_function(*args):
+      args = [a for i, a in enumerate(args)
+              if a is not None and i not in skip_positions]
       return self._backward_graph_function(*(list(args) + side_outputs))  # pylint: disable=not-callable
 
     tape.record_operation(self._forward_function.signature.name, real_outputs,
@@ -1341,7 +1347,9 @@ def defun_with_attributes(func=None,
     attributes: A dictionary of arguments which will be added to function def as
       attributes. Currently only support primitive types as value, and only
       whitelisted attribute name is allowed. Unwhitelisted attribute name or
-      unsupported value will result into ValueError.
+      unsupported value will result into ValueError. `func_name` is also one of
+      the whitelisted argument which is a python string, and sets the name for
+      this `Function` in the graph.
     experimental_autograph: same as defun()'s experimental_autograph.
 
   Returns:
@@ -1354,7 +1362,10 @@ def defun_with_attributes(func=None,
   # TODO(apassos): deal with captured global state. Deal with control flow.
   def decorated(function):
     try:
-      name = function.__name__
+      if attributes:
+        name = attributes.pop("func_name", function.__name__)
+      else:
+        name = function.__name__
     except AttributeError:
       name = "function"
     return tf_decorator.make_decorator(

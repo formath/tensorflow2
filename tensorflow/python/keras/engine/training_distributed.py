@@ -23,6 +23,7 @@ import enum
 import numpy as np
 
 from tensorflow.python.framework import constant_op
+from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import errors
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.keras import backend as K
@@ -32,6 +33,7 @@ from tensorflow.python.keras import optimizers
 from tensorflow.python.keras.engine import distributed_training_utils
 from tensorflow.python.keras.utils.generic_utils import Progbar
 from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.platform import tf_logging as logging
 from tensorflow.python.training import distribute as distribute_lib
@@ -103,9 +105,9 @@ def fit_loop(
     # Create train ops on each of the devices when we call
     # `_per_device_train_function`.
     (grouped_inputs, grouped_outputs, grouped_updates,
-     grouped_session_args) = current_strategy.call_for_each_tower(
+     grouped_session_args) = current_strategy.call_for_each_replica(
          _per_device_train_function, model._grouped_model)
-    # Unwrap all the per device values returned from `call_for_each_tower`.
+    # Unwrap all the per device values returned from `call_for_each_replica`.
     # Unwrapping per device values gives you a list of values that can be
     # used to construct a new train function that is composed of update ops on
     # all the devices over which the model is distributed.
@@ -131,7 +133,7 @@ def fit_loop(
     # We need to set sample_weights to None since there are sample weight
     # placeholders that are created with default values.
     sample_weights = [None for _ in range(len(model.outputs) *
-                                          current_strategy.num_towers)]
+                                          current_strategy.num_replicas)]
     if model.uses_learning_phase and not isinstance(K.learning_phase(), int):
       ins = dataset_inputs + dataset_targets + sample_weights + [1]
     else:
@@ -183,7 +185,7 @@ def fit_loop(
         if not isinstance(outs, list):
           outs = [outs]
 
-        outs = _aggregate_metrics_across_towers(current_strategy.num_towers,
+        outs = _aggregate_metrics_across_towers(current_strategy.num_replicas,
                                                 out_labels,
                                                 model.stateful_metric_names,
                                                 outs)
@@ -279,7 +281,7 @@ def _experimental_fit_loop(
         mode=_Mode.TRAIN)
 
     (grouped_inputs, grouped_outputs, grouped_updates,
-     grouped_session_args) = current_strategy.call_for_each_tower(
+     grouped_session_args) = current_strategy.call_for_each_replica(
          _per_device_train_function, model._grouped_model_train)
     (all_inputs, all_outputs, all_updates,
      all_session_args) = distributed_training_utils.unwrap_values(
@@ -452,7 +454,7 @@ def test_loop(model, iterator, verbose=0, steps=None):
   inputs, targets = _get_input_from_iterator(iterator, model)
   with current_strategy.scope():
     (grouped_inputs, grouped_outputs, grouped_updates,
-     grouped_session_args) = current_strategy.call_for_each_tower(
+     grouped_session_args) = current_strategy.call_for_each_replica(
          _per_device_test_function, model._grouped_model)
 
     (all_inputs, all_outputs, all_updates,
@@ -474,7 +476,7 @@ def test_loop(model, iterator, verbose=0, steps=None):
     # We need to set sample_weights to None since there are sample weight
     # placeholders that are created with default values.
     sample_weights = [None for _ in range(len(model.outputs) *
-                                          current_strategy.num_towers)]
+                                          current_strategy.num_replicas)]
     if model.uses_learning_phase and not isinstance(K.learning_phase(), int):
       ins = dataset_inputs + dataset_targets + sample_weights + [0]
     else:
@@ -501,7 +503,7 @@ def test_loop(model, iterator, verbose=0, steps=None):
     for step in range(steps):
       batch_outs = distributed_test_function(ins)
       batch_outs = _aggregate_metrics_across_towers(
-          current_strategy.num_towers, model.metrics_names,
+          current_strategy.num_replicas, model.metrics_names,
           model.stateful_metric_names, batch_outs)
       if isinstance(batch_outs, list):
         if step == 0:
@@ -574,7 +576,7 @@ def _experimental_test_loop(model, iterator, verbose=0, steps=None,
         mode=_Mode.TEST)
 
     (grouped_inputs, grouped_outputs, grouped_updates,
-     grouped_session_args) = current_strategy.call_for_each_tower(
+     grouped_session_args) = current_strategy.call_for_each_replica(
          _per_device_test_function, model._grouped_model_test)
 
     (all_inputs, all_outputs, all_updates,
@@ -679,7 +681,7 @@ def predict_loop(model, iterator, verbose=0, steps=None):
   inputs, _ = _get_input_from_iterator(iterator, model)
   with current_strategy.scope():
     (grouped_inputs, grouped_outputs, grouped_updates,
-     grouped_session_args) = current_strategy.call_for_each_tower(
+     grouped_session_args) = current_strategy.call_for_each_replica(
          _per_device_predict_function, model._grouped_model)
 
     (all_inputs, all_outputs, all_updates,
@@ -722,7 +724,7 @@ def predict_loop(model, iterator, verbose=0, steps=None):
         if step == 0:
           for _ in batch_outs:
             unconcatenated_outs.append([])
-        # TODO(anjalisridhar): Should combine the outputs from multiple towers
+        # TODO(anjalisridhar): Should combine the outputs from multiple replicas
         # correctly here.
         for i, batch_out in enumerate(batch_outs):
           unconcatenated_outs[i].append(batch_out)
@@ -779,7 +781,7 @@ def _experimental_predict_loop(model, iterator, verbose=0, steps=None):
         mode=_Mode.PREDICT)
 
     (grouped_inputs, grouped_outputs, grouped_updates,
-     grouped_session_args) = current_strategy.call_for_each_tower(
+     grouped_session_args) = current_strategy.call_for_each_replica(
          _per_device_predict_function, model._grouped_model_predict)
 
     (all_inputs, all_outputs, all_updates,
@@ -864,6 +866,17 @@ def _clone_and_build_model(model, inputs=None, targets=None):
     optimizer_config = model.optimizer.get_config()
     optimizer = model.optimizer.__class__.from_config(optimizer_config)
 
+  # Recast all low precision outputs back to float32 since we only casted
+  # the inputs to bfloat16 and not targets. This is done so that we can preserve
+  # precision when calculating the loss value.
+  def _upcast_low_precision_outputs(output):
+    if output.dtype == dtypes.bfloat16:
+      return math_ops.cast(output, dtypes.float32)
+    else:
+      return output
+  cloned_model.outputs = [_upcast_low_precision_outputs(o)
+                          for o in cloned_model.outputs]
+
   if isinstance(targets, tuple):
     targets = nest.flatten(targets)
   cloned_model.compile(
@@ -879,9 +892,9 @@ def _clone_and_build_model(model, inputs=None, targets=None):
 
 def clone_model_on_towers(model, strategy, make_callback_model=False,
                           inputs=None, targets=None, mode=None):
-  """Create a cloned model on each tower."""
+  """Create a cloned model on each replica."""
   with strategy.scope():
-    grouped_model = strategy.call_for_each_tower(
+    grouped_model = strategy.call_for_each_replica(
         _clone_and_build_model, model, inputs, targets)
     if mode is _Mode.TRAIN:
       model._grouped_model_train = grouped_model
@@ -897,9 +910,9 @@ def clone_model_on_towers(model, strategy, make_callback_model=False,
 
 def _aggregate_metrics_across_towers(num_devices, out_labels,
                                      stateful_metric_names, outs):
-  """Aggregates stateless metrics values across towers.
+  """Aggregates stateless metrics values across replicas.
 
-  When using `MirroredStrategy`, the number of towers is equal to the
+  When using `MirroredStrategy`, the number of replicas is equal to the
   number of devices over which training is distributed. This may not always be
   the case.
 
@@ -907,13 +920,13 @@ def _aggregate_metrics_across_towers(num_devices, out_labels,
     num_devices: Number of devices over which the model is being distributed.
     out_labels: The list of metric names passed to `compile`.
     stateful_metric_names: List of stateful metric names on the model.
-    outs: The output from all the towers.
+    outs: The output from all the replicas.
 
   Returns:
-    The average value of each metric across the towers.
+    The average value of each metric across the replicas.
   """
   # TODO(anjalisridhar): Temporary workaround for aggregating metrics
-  # across towers. Replace with the new metrics module eventually.
+  # across replicas. Replace with the new metrics module eventually.
   merged_output = []
   # The first output is the total loss.
   merged_output.append(outs[0])

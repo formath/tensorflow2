@@ -213,10 +213,6 @@ tf_module {
     mtype: "<type \'type\'>"
   }
   member {
-    name: "contrib"
-    mtype: "<class \'tensorflow.python.util.lazy_loader.LazyLoader\'>"
-  }
-  member {
     name: "data"
     mtype: "<type \'module\'>"
   }
@@ -310,10 +306,6 @@ tf_module {
   }
   member {
     name: "keras"
-    mtype: "<type \'module\'>"
-  }
-  member {
-    name: "layers"
     mtype: "<type \'module\'>"
   }
   member {
@@ -1119,6 +1111,10 @@ tf_module {
   member_method {
     name: "matrix_solve"
     argspec: "args=[\'matrix\', \'rhs\', \'adjoint\', \'name\'], varargs=None, keywords=None, defaults=[\'False\', \'None\'], "
+  }
+  member_method {
+    name: "matrix_square_root"
+    argspec: "args=[\'input\', \'name\'], varargs=None, keywords=None, defaults=[\'None\'], "
   }
   member_method {
     name: "matrix_triangular_solve"
