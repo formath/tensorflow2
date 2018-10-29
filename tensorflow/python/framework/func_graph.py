@@ -34,12 +34,17 @@ from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.util import compat
 from tensorflow.python.util import nest
+from tensorflow.python.util import tf_decorator
+from tensorflow.python.util import tf_inspect
 from tensorflow.python.util.lazy_loader import LazyLoader
 
 # This is to avoid a circular dependency:
 # function -> func_graph
 function = LazyLoader("function", globals(),
                       "tensorflow.python.eager.function")
+def_function = LazyLoader(
+    "def_function", globals(),
+    "tensorflow.python.eager.def_function")
 
 WHITELIST_COLLECTIONS = [
     ops.GraphKeys.GLOBAL_VARIABLES,
@@ -385,14 +390,25 @@ def func_graph_from_py_func(name,
     try:
       if experimental_autograph:
         from tensorflow.python import autograph  # pylint: disable=g-import-not-at-top
+        _, original_func = tf_decorator.unwrap(python_func)
+
+        # AutoGraph does not yet rebind the returned method, and must receive
+        # `self` explicitly.
+        # TODO(mdan): Have the result automatically bind it instead.
+        if (tf_inspect.ismethod(original_func) and
+            hasattr(original_func, "__self__")):
+          effective_func_args = (original_func.__self__,) + func_args
+        else:
+          effective_func_args = func_args
+
         func_outputs = autograph.converted_call(
-            python_func, None,
+            original_func, None,
             autograph.ConversionOptions(
                 verbose=True,
                 recursive=True,
-                strip_decorators=(function.defun,),
+                strip_decorators=(function.defun, def_function.function),
                 optional_features=(),
-            ), *func_args, **func_kwargs)
+            ), *effective_func_args, **func_kwargs)
       else:
         func_outputs = python_func(*func_args, **func_kwargs)
       # invariant: `func_outputs` contains only Tensors and `None`s.
