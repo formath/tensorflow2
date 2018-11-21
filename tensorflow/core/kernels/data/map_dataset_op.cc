@@ -206,6 +206,12 @@ class MapDatasetOp : public UnaryDatasetOpKernel {
       }
 
      protected:
+      std::shared_ptr<model::Node> CreateNode(
+          IteratorContext* ctx, model::Node::Args args) const override {
+        return model::MakeKnownRatioNode(std::move(args),
+                                         /*ratio=*/1);
+      }
+
       Status SaveInternal(IteratorStateWriter* writer) override {
         TF_RETURN_IF_ERROR(SaveInput(writer, input_impl_));
         return Status::OK();
@@ -238,6 +244,11 @@ class MapDatasetOp : public UnaryDatasetOpKernel {
 };
 
 REGISTER_KERNEL_BUILDER(Name("MapDataset").Device(DEVICE_CPU), MapDatasetOp);
+REGISTER_KERNEL_BUILDER(Name("ExperimentalMapDataset")
+                            .Device(DEVICE_GPU)
+                            .HostMemory("input_dataset")
+                            .HostMemory("handle"),
+                        MapDatasetOp);
 
 }  // namespace
 }  // namespace data

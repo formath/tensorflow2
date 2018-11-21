@@ -34,10 +34,12 @@ from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import errors
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import sparse_tensor
+from tensorflow.python.framework import test_util
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import bitwise_ops
 from tensorflow.python.ops import check_ops
 from tensorflow.python.ops import clip_ops
+from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import nn
 from tensorflow.python.ops import parsing_ops
@@ -280,15 +282,22 @@ def _generate_optimization_test_cases():
         y for y in parse_result if not isinstance(y, sparse_tensor.SparseTensor)
     ]
 
+  def map_fn_with_cycle(x):
+    c = lambda i: math_ops.less(i, 10)
+    b = lambda i: math_ops.add(i, 1)
+    return control_flow_ops.while_loop(c, b, [x])
+
   # Misc test cases
   test_cases = [
       ("Basic", lambda x: (x, x + 1), base_dataset_factory),
       ("Broadcast", lambda x: x + rand_val, base_dataset_factory),
+      ("Cycle", map_fn_with_cycle, lambda: dataset_ops.Dataset.from_tensors(1)),
       ("Const", lambda x: 2, base_dataset_factory),
       ("Cast", lambda x: math_ops.cast(x, dtypes.float64),
        base_dataset_factory),
       ("Reshape", lambda x: array_ops.reshape(x, (-1, 30)),
        base_dataset_factory),
+      ("Transpose", array_ops.transpose, base_dataset_factory),
       ("Unpack", array_ops.unstack, base_dataset_factory),
       ("UnpackNegativeAxis", lambda x: array_ops.unstack(x, axis=-1),
        base_dataset_factory),
@@ -311,6 +320,7 @@ def _generate_optimization_test_cases():
   } for x in test_cases for num_parallel_calls in (None, 12)]
 
 
+@test_util.run_all_in_graph_and_eager_modes
 class MapVectorizationTest(test_base.DatasetTestBase, parameterized.TestCase):
 
   def _get_test_datasets(self,
@@ -358,7 +368,8 @@ class MapVectorizationTest(test_base.DatasetTestBase, parameterized.TestCase):
                                                      num_parallel_calls)
     self.assertDatasetsEqual(unoptimized, optimized)
 
-  def testOptimizationBadMapFn(self):
+  # TODO(b/117581999): Add eager coverage for the following tests.
+  def testSkipEagerOptimizationBadMapFn(self):
     # Test map functions that give an error
     def map_fn(x):
       # x has leading dimension 5, this will raise an error
@@ -386,7 +397,8 @@ class MapVectorizationTest(test_base.DatasetTestBase, parameterized.TestCase):
         base_dataset, map_fn, expect_optimized=True)
     self.assertDatasetsEqual(optimized, unoptimized)
 
-  def testOptimizationIgnoreStateful(self):
+  # TODO(b/117581999): Add eager coverage for the following tests.
+  def testSkipEagerOptimizationIgnoreStateful(self):
 
     def map_fn(x):
       with ops.control_dependencies([check_ops.assert_equal(x, 0)]):
@@ -412,7 +424,8 @@ class MapVectorizationTest(test_base.DatasetTestBase, parameterized.TestCase):
         base_dataset, map_fn, expect_optimized=False)
     self.assertDatasetsEqual(unoptimized, optimized)
 
-  def testOptimizationIgnoreRaggedMap(self):
+  # TODO(b/117581999): Add eager coverage for the following tests.
+  def testSkipEagerOptimizationIgnoreRaggedMap(self):
     # Don't optimize when the output of the map fn shapes are unknown.
     def map_fn(x):
       return array_ops.tile(x, x)

@@ -51,7 +51,6 @@ from tensorflow.python.ops import math_grad  # pylint: disable=unused-import
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import random_grad  # pylint: disable=unused-import
 from tensorflow.python.ops import resource_variable_ops
-from tensorflow.python.ops import spectral_grad  # pylint: disable=unused-import
 from tensorflow.python.ops import tensor_array_ops
 from tensorflow.python.ops.unconnected_gradients import UnconnectedGradients
 from tensorflow.python.platform import tf_logging as logging
@@ -264,6 +263,12 @@ def _DefaultGradYs(grad_ys,
               "Gradient type %s generated for variant "
               "tensor %s with type %s must be variant" % (dtypes.as_dtype(
                   grad_y.dtype).name, y, dtypes.as_dtype(y.dtype).name))
+      elif y.dtype == dtypes.resource:
+        # We assume y is the handle of a ResourceVariable. The gradient of a
+        # ResourceVariable should be a numeric value, not another resource.
+        if grad_y.dtype == dtypes.resource:
+          raise TypeError("Input gradient %s for resource tensor %s should not "
+                          "be a resource" % (grad_y, y))
       else:
         raise TypeError(
             "Tensor %s with type %s must be numeric "

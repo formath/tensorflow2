@@ -58,6 +58,21 @@ def _make_getter(captured_getter, captured_previous):
   return getter
 
 
+def _has_cycle(op, path):
+  """Detect cycles in the dependencies of `initial_value`."""
+  if op.name in path:
+    return True
+  path.add(op.name)
+  for op_input in op.inputs:
+    if _has_cycle(op_input.op, path):
+      return True
+  for op_control_input in op.control_inputs:
+    if _has_cycle(op_control_input, path):
+      return True
+  path.remove(op.name)
+  return False
+
+
 @tf_export("VariableSynchronization")
 class VariableSynchronization(enum.Enum):
   """Indicates when a distributed variable will be synced.
@@ -2172,20 +2187,7 @@ class RefVariable(VariableV1):
       raise TypeError("initial_value needs to be a Tensor: %s" % initial_value)
 
     # Don't modify initial_value if it contains any cyclic dependencies.
-    def has_cycle(op, path):
-      """Detect cycles in the dependencies of `initial_value`."""
-      if op.name in path:
-        return True
-      path.add(op.name)
-      for op_input in op.inputs:
-        if has_cycle(op_input.op, path):
-          return True
-      for op_control_input in op.control_inputs:
-        if has_cycle(op_control_input, path):
-          return True
-      path.remove(op.name)
-      return False
-    if has_cycle(initial_value.op, path=set()):
+    if _has_cycle(initial_value.op, path=set()):
       return initial_value
 
     return self._safe_initial_value_from_tensor(initial_value, op_cache={})
@@ -2455,34 +2457,6 @@ class PartitionedVariable(object):
   @end_compatibility
   """
 
-  class PartitionedVariableIterator(object):
-    """An iterator that allows accessing the underlying `Variable` objects.
-
-    This iterator is necessary to control order of access when Variables
-    are not partitioned in a standard way along a single axis.
-
-    Allows e.g. `list(partitioned_variable)` to return a proper list.
-    """
-
-    def __init__(self, partitioned_variable):
-      self._ix = 0
-      self._partitioned_variable = partitioned_variable
-
-    def __iter__(self):
-      return self
-
-    def __next__(self):  # For python3 compatibility.
-      return self.next()
-
-    def next(self):
-      # pylint: disable=protected-access
-      if self._ix >= len(self._partitioned_variable._variable_list):
-        raise StopIteration()
-      variable = self._partitioned_variable._variable_list[self._ix]
-      # pylint: enable=protected-access
-      self._ix += 1
-      return variable
-
   def __init__(self, name, shape, dtype, variable_list, partitions):
     """Creates a new partitioned variable wrapper.
 
@@ -2502,11 +2476,7 @@ class PartitionedVariable(object):
         `partitions` is not a list.
       ValueError: If `variable_list` is empty, or the `Variable` shape
         information does not match `shape`, or `partitions` has invalid values.
-      RuntimeError: If eager execution is enabled
     """
-    if context.executing_eagerly():
-      raise RuntimeError(
-          "tf.PartitionedVariable not supported with eager execution enabled.")
     if not isinstance(variable_list, (list, tuple)):
       raise TypeError(
           "variable_list is not a list or tuple: %s" % variable_list)
@@ -2543,7 +2513,7 @@ class PartitionedVariable(object):
 
   def __iter__(self):
     """Return an iterable for accessing the underlying partition Variables."""
-    return self.PartitionedVariableIterator(self)
+    return iter(self._variable_list)
 
   def __len__(self):
     num_partition_axes = len(self._partition_axes())

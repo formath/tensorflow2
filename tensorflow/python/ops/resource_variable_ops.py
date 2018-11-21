@@ -519,7 +519,10 @@ class ResourceVariable(variables.RefVariable):
       snapshot = g.as_graph_element(
           ops.prepend_name_scope(
               variable_def.snapshot_name, import_scope=import_scope))
-      self._cached_value = snapshot
+      if snapshot.op.type != "ReadVariableOp":
+        self._cached_value = snapshot
+      else:
+        self._cached_value = None
       while snapshot.op.type != "ReadVariableOp":
         snapshot = snapshot.op.inputs[0]
       self._graph_element = snapshot
@@ -1504,3 +1507,21 @@ def is_resource_variable(var):
   """"Returns True if `var` is to be considered a ResourceVariable."""
   return isinstance(var, ResourceVariable) or hasattr(
       var, "_should_act_as_resource_variable")
+
+
+def copy_to_graph_uninitialized(var):
+  """Copies an existing variable to a new graph, with no initializer."""
+  # Like ResourceVariable.__deepcopy__, but does not set an initializer on the
+  # new variable.
+  # pylint: disable=protected-access
+  new_variable = ResourceVariable(
+      initial_value=array_ops.placeholder(
+          shape=var.shape, dtype=var.dtype,
+          name="unused_initial_variable_value"),
+      trainable=var.trainable,
+      constraint=var._constraint,
+      dtype=var.dtype,
+      name=var._shared_name)
+  new_variable._maybe_initialize_checkpointable()
+  # pylint: enable=protected-access
+  return new_variable
