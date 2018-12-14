@@ -109,7 +109,7 @@ cc_library(
     name = "status_macros",
     srcs = ["status_macros.cc"],
     hdrs = ["status_macros.h"],
-    visibility = [":friends"],
+    visibility = ["//visibility:public"],
     deps = [
         ":statusor",
         ":types",
@@ -224,14 +224,18 @@ cc_library(
     name = "shape_util",
     srcs = [
         "index_util.cc",
+        "layout.cc",
         "layout_util.cc",
         "primitive_util.cc",
+        "shape.cc",
         "shape_util.cc",
     ],
     hdrs = [
         "index_util.h",
+        "layout.h",
         "layout_util.h",
         "primitive_util.h",
+        "shape.h",
         "shape_util.h",
     ],
     visibility = ["//visibility:public"],
@@ -251,6 +255,23 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
+    ],
+)
+
+tf_cc_test(
+    name = "shape_test",
+    srcs = ["shape_test.cc"],
+    deps = [
+        ":shape_util",
+        ":status_macros",
+        ":test",
+        ":test_helpers",
+        ":types",
+        ":util",
+        ":xla_data_proto",
+        "//tensorflow/core:lib",
+        "//tensorflow/core:test_main",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -279,6 +300,22 @@ tf_cc_test(
         ":test",
         ":test_helpers",
         "//tensorflow/core:test_main",
+    ],
+)
+
+tf_cc_test(
+    name = "layout_test",
+    srcs = ["layout_test.cc"],
+    deps = [
+        ":shape_util",
+        ":status_macros",
+        ":test",
+        ":test_helpers",
+        ":types",
+        ":util",
+        ":xla_data_proto",
+        "//tensorflow/core:test_main",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -686,7 +723,6 @@ cc_library(
         "//tensorflow/compiler/xla/service:hlo",
         "//tensorflow/compiler/xla/service:hlo_evaluator",
         "//tensorflow/compiler/xla/service:shape_inference",
-        "//tensorflow/compiler/xla/service/cpu:runtime_single_threaded_matmul",
         "//tensorflow/core:lib",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/types:span",

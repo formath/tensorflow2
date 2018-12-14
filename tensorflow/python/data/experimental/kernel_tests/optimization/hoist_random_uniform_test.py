@@ -69,7 +69,7 @@ class HoistRandomUniformTest(test_base.DatasetTestBase, parameterized.TestCase):
       iterator = dataset.__iter__()
       get_next = iterator._next_internal  # pylint: disable=protected-access
     else:
-      iterator = dataset.make_one_shot_iterator()
+      iterator = dataset_ops.make_one_shot_iterator(dataset)
       get_next = iterator.get_next
     for _ in range(5):
       result = self.evaluate(get_next())
@@ -91,7 +91,7 @@ class HoistRandomUniformTest(test_base.DatasetTestBase, parameterized.TestCase):
             ["Zip[0]", "Map"] if will_optimize else ["Map"])).map(function)
 
     options = dataset_ops.Options()
-    options.experimental_hoist_random_uniform = True
+    options.experimental_optimization.hoist_random_uniform = True
     dataset = dataset.with_options(options)
     self._testDataset(dataset)
 
@@ -107,7 +107,7 @@ class HoistRandomUniformTest(test_base.DatasetTestBase, parameterized.TestCase):
     dataset = dataset_ops.Dataset.range(5).apply(
         optimization.assert_next(["Zip[0]", "Map"])).map(random_with_capture)
     options = dataset_ops.Options()
-    options.experimental_hoist_random_uniform = True
+    options.experimental_optimization.hoist_random_uniform = True
     dataset = dataset.with_options(options)
     self._testDataset(dataset)
 

@@ -31,8 +31,6 @@ from tensorflow.python.keras.engine.input_layer import InputLayer
 from tensorflow.python.keras.engine.network import Network
 from tensorflow.python.keras.utils import generic_utils
 from tensorflow.python.keras.utils.generic_utils import CustomObjectScope
-from tensorflow.python.training.checkpointable import base as checkpointable
-from tensorflow.python.training.checkpointable import data_structures
 from tensorflow.python.util.tf_export import tf_export
 
 # API entries importable from `keras.models`:
@@ -100,17 +98,19 @@ def _clone_functional_model(model, input_tensors=None):
       input_tensors = list(input_tensors)
     input_tensors = generic_utils.to_list(input_tensors)
     input_tensors_ = []
-    for i, x in enumerate(input_tensors):
-      if not K.is_keras_tensor(x):
-        name = model._input_layers[i].name
-        input_tensor = Input(tensor=x, name='input_wrapper_for_' + name)
+    for i in range(len(input_tensors)):
+      input_tensor = input_tensors[i]
+      if not K.is_keras_tensor(input_tensor):
+        original_input_layer = model._input_layers[i]
+        name = original_input_layer.name
+        input_tensor = Input(tensor=input_tensor,
+                             name='input_wrapper_for_' + name)
         input_tensors_.append(input_tensor)
         # Cache newly created input layer.
-        original_input_layer = x._keras_history[0]
         newly_created_input_layer = input_tensor._keras_history[0]
         layer_map[original_input_layer] = newly_created_input_layer
       else:
-        input_tensors_.append(x)
+        input_tensors_.append(input_tensor)
     input_tensors = input_tensors_
 
   for x, y in zip(model.inputs, input_tensors):
@@ -209,14 +209,17 @@ def _clone_sequential_model(model, input_tensors=None):
   # Use model._layers to ensure that all layers are cloned. The model's layers
   # property will exclude the initial InputLayer (if it exists) in the model,
   # resulting in a different Sequential model structure.
-  layers = [clone(layer) for layer in model._layers]
   if input_tensors is None:
+    layers = [clone(layer) for layer in model._layers]
     return Sequential(layers=layers, name=model.name)
   else:
     # If input tensors are provided, the original model's InputLayer is
     # overwritten with a different InputLayer.
-    if isinstance(layers[0], InputLayer):
-      layers = layers[1:]
+    layers = [
+        clone(layer)
+        for layer in model._layers
+        if not isinstance(layer, InputLayer)
+    ]
     if len(generic_utils.to_list(input_tensors)) != 1:
       raise ValueError('To clone a `Sequential` model, we expect '
                        ' at most one tensor '
@@ -303,6 +306,10 @@ def _in_place_subclassed_model_reset(model):
     if isinstance(value, Layer):
       attributes_cache[name] = value
       assert value in model._layers
+      if hasattr(value, '_layers') and value._layers:
+        raise ValueError('We do not support the use of nested layers '
+                         'in `model_to_estimator` at this time. Found nested '
+                         'layer: %s' % value)
     elif isinstance(
         value,
         (list, tuple)) and name not in ('layers', '_layers', 'metrics',
@@ -317,7 +324,9 @@ def _in_place_subclassed_model_reset(model):
   # Replace layers on the model with fresh layers
   layers_to_names = {value: key for key, value in attributes_cache.items()}
   original_layers = model._layers[:]
-  model._layers = data_structures.NoDependency([])
+  setattr_tracking = model._setattr_tracking
+  model._setattr_tracking = False
+  model._layers = []
   for layer in original_layers:  # We preserve layer order.
     config = layer.get_config()
     # This will not work for nested subclassed models used as layers.
@@ -330,6 +339,7 @@ def _in_place_subclassed_model_reset(model):
     fresh_layer = layer.__class__.from_config(config)
     name = layers_to_names[layer]
     setattr(model, name, fresh_layer)
+    model._layers.append(fresh_layer)
 
   # Cache original model build attributes (in addition to layers)
   if (not hasattr(model, '_original_attributes_cache') or
@@ -362,12 +372,12 @@ def _in_place_subclassed_model_reset(model):
       ]
       for name in attributes_to_cache:
         attributes_cache[name] = getattr(model, name)
-  model._original_attributes_cache = data_structures.NoDependency(
-      attributes_cache)
+  model._original_attributes_cache = attributes_cache
   # Reset built state
   model.built = False
   model.inputs = None
   model.outputs = None
+  model._setattr_tracking = setattr_tracking
 
 
 def in_place_subclassed_model_state_restoration(model):
@@ -388,15 +398,15 @@ def in_place_subclassed_model_state_restoration(model):
     # back the previous attributes and track Layers by their original names
     # without adding dependencies on "utility" attributes which Models exempt
     # when they're constructed.
-    model._layers = data_structures.NoDependency([])
+    setattr_tracking = model._setattr_tracking
+    model._setattr_tracking = False
+    model._layers = []
     for name, value in model._original_attributes_cache.items():
-      if not isinstance(value, checkpointable.CheckpointableBase):
-        # If this value is not already checkpointable, it's probably that way
-        # for a reason; we don't want to start tracking data structures that the
-        # original Model didn't.
-        value = data_structures.NoDependency(value)
       setattr(model, name, value)
+      if isinstance(value, Layer):
+        model._layers.append(value)
     model._original_attributes_cache = None
+    model._setattr_tracking = setattr_tracking
   else:
     # Restore to the state of a never-called model.
     model.built = False

@@ -67,7 +67,7 @@ class MapParallelizationTest(test_base.DatasetTestBase, parameterized.TestCase):
     dataset = dataset_ops.Dataset.range(5).apply(
         optimization.assert_next(next_nodes)).map(function)
     options = dataset_ops.Options()
-    options.experimental_map_parallelization = True
+    options.experimental_optimization.map_parallelization = True
     dataset = dataset.with_options(options)
     if should_optimize:
       self.assertDatasetProduces(

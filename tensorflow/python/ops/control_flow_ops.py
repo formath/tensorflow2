@@ -24,13 +24,11 @@ from __future__ import print_function
 import abc
 import collections
 import functools
-import os
 
 import six
 
 from tensorflow.core.framework import attr_value_pb2
 from tensorflow.core.protobuf import control_flow_pb2
-from tensorflow.python import tf2
 from tensorflow.python.eager import context
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
@@ -70,9 +68,6 @@ cond_v2 = LazyLoader("cond_v2", globals(),
 # while_v2 -> gradients_impl -> control_flow_ops
 while_v2 = LazyLoader("while_v2", globals(),
                       "tensorflow.python.ops.while_v2")
-
-ENABLE_COND_V2 = tf2.enabled() or os.getenv("TF_ENABLE_COND_V2", "0") != "0"
-ENABLE_WHILE_V2 = tf2.enabled() or os.getenv("TF_ENABLE_WHILE_V2", "0") != "0"
 
 # We override the 'tuple' for a control flow op, so we keep python's
 # existing 'tuple' for later use in this module.
@@ -158,7 +153,7 @@ def Assert(condition, data, summarize=None, name=None):
 
   with ops.name_scope(name, "Assert", [condition, data]) as name:
     xs = ops.convert_n_to_tensor(data)
-    if all([x.dtype in {dtypes.string, dtypes.int32} for x in xs]):
+    if all(x.dtype in {dtypes.string, dtypes.int32} for x in xs):
       # As a simple heuristic, we assume that string and int32 are
       # on host to avoid the need to use cond. If it is not case,
       # we will pay the price copying the tensor to host memory.
@@ -457,19 +452,19 @@ def merge(inputs, name=None):
     ValueError: If any of the inputs is None, or inputs are IndexedSlices and
       some but not all have a dense_shape property.
   """
-  if any([inp is None for inp in inputs]):
+  if any(inp is None for inp in inputs):
     raise ValueError("At least one of the merge inputs is None: %s" % inputs)
   with ops.name_scope(name, "Merge", inputs) as name:
     inputs = [
         ops.internal_convert_to_tensor_or_indexed_slices(inp, as_ref=True)
         for inp in inputs
     ]
-    if all([isinstance(v, ops.Tensor) for v in inputs]):
-      if all([v.dtype._is_ref_dtype for v in inputs]):  # pylint: disable=protected-access
+    if all(isinstance(v, ops.Tensor) for v in inputs):
+      if all(v.dtype._is_ref_dtype for v in inputs):  # pylint: disable=protected-access
         return gen_control_flow_ops.ref_merge(inputs, name)
       else:
         return gen_control_flow_ops.merge(inputs, name)
-    elif all([isinstance(v, sparse_tensor.SparseTensor) for v in inputs]):
+    elif all(isinstance(v, sparse_tensor.SparseTensor) for v in inputs):
       # Only handle the case when all inputs are SparseTensor.
       values, _ = merge([inp.values for inp in inputs], name=name)
       indices, chosen_index = gen_control_flow_ops.merge(
@@ -557,7 +552,7 @@ def _SetShapeInvariants(input_vars, enter_vars, shapes):
   if shapes is None:
     return
   flat_shapes = nest.flatten(shapes)
-  if not all([isinstance(s, tensor_shape.TensorShape) for s in flat_shapes]):
+  if not all(isinstance(s, tensor_shape.TensorShape) for s in flat_shapes):
     raise ValueError("`shapes` must be a (possibly nested) list of shapes.")
   # Check that the shapes of the inputs are less than the shape invariants,
   # and set the shapes of `enter_vars` to the shape invariants.
@@ -2052,7 +2047,7 @@ def cond(pred,
   ```
 
   """
-  if ENABLE_COND_V2 and not context.executing_eagerly():
+  if util.ENABLE_CONTROL_FLOW_V2 and not context.executing_eagerly():
     return cond_v2.cond_v2(pred, true_fn, false_fn, name)
 
   # We needed to make true_fn/false_fn keyword arguments for
@@ -3145,7 +3140,6 @@ def while_loop_v2(cond,
                   back_prop=True,
                   swap_memory=False,
                   maximum_iterations=None,
-                  return_same_structure=False,
                   name=None):
   """Repeat `body` while the condition `cond` is true.
 
@@ -3221,17 +3215,11 @@ def while_loop_v2(cond,
       to run.  If provided, the `cond` output is AND-ed with an additional
       condition ensuring the number of iterations executed is no greater than
       `maximum_iterations`.
-    return_same_structure: If True, output has same structure as `loop_vars`. If
-      eager execution is enabled, this is ignored (and always treated as True).
     name: Optional name prefix for the returned tensors.
 
   Returns:
-    The output tensors for the loop variables after the loop.
-     If `return_same_structure` is True, the return value has the same
-     structure as `loop_vars`.
-     If `return_same_structure` is False, the return value is a Tensor,
-     TensorArray or IndexedSlice if the length of `loop_vars` is 1, or a list
-     otherwise.
+    The output tensors for the loop variables after the loop. The return value
+      has the same structure as `loop_vars`.
 
   Raises:
     TypeError: if `cond` or `body` is not callable.
@@ -3318,7 +3306,7 @@ def while_loop_v2(cond,
       swap_memory=swap_memory,
       name=name,
       maximum_iterations=maximum_iterations,
-      return_same_structure=return_same_structure)
+      return_same_structure=True)
 
 
 # pylint: disable=redefined-outer-name
@@ -3494,14 +3482,15 @@ def while_loop(cond,
   ```
 
   """
-  if ENABLE_WHILE_V2 and not context.executing_eagerly():
+  if util.ENABLE_CONTROL_FLOW_V2 and not context.executing_eagerly():
     return while_v2.while_loop(
         cond,
         body,
         loop_vars,
         shape_invariants=shape_invariants,
         maximum_iterations=maximum_iterations,
-        name=name)
+        name=name,
+        return_same_structure=return_same_structure)
 
   with ops.name_scope(name, "while", loop_vars):
     if not loop_vars:

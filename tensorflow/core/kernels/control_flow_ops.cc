@@ -78,6 +78,7 @@ TF_CALL_QUANTIZED_TYPES(REGISTER_GPU_SWITCH);
 TF_CALL_NUMBER_TYPES_NO_INT32(REGISTER_GPU_REF_SWITCH);
 TF_CALL_QUANTIZED_TYPES(REGISTER_GPU_REF_SWITCH);
 REGISTER_GPU_SWITCH(uint64);
+TF_CALL_variant(REGISTER_GPU_SWITCH);
 
 #undef REGISTER_CPU_SWITCH
 #undef REGISTER_CPU_REF_SWITCH
@@ -600,6 +601,13 @@ LoopCondOp::LoopCondOp(OpKernelConstruction* context) : OpKernel(context) {}
 LoopCondOp::~LoopCondOp() = default;
 
 void LoopCondOp::Compute(OpKernelContext* context) {
+  CancellationManager* cm = context->cancellation_manager();
+  if (cm != nullptr) {
+    bool already_cancelled = cm->IsCancelled();
+    OP_REQUIRES(context, !already_cancelled,
+                errors::Cancelled("Loop execution was cancelled."));
+  }
+
   context->set_output(0, context->input(0));
 }
 

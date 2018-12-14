@@ -192,8 +192,8 @@ class TimeDistributedTest(test.TestCase):
     x = keras.layers.Input(shape=(3, 2))
     layer = keras.layers.TimeDistributed(keras.layers.BatchNormalization())
     _ = layer(x)
-    self.assertEquals(len(layer.updates), 2)
-    self.assertEquals(len(layer.trainable_weights), 2)
+    self.assertEqual(len(layer.updates), 2)
+    self.assertEqual(len(layer.trainable_weights), 2)
     layer.trainable = False
     assert not layer.updates
     assert not layer.trainable_weights
@@ -375,6 +375,7 @@ class BidirectionalTest(test.TestCase):
       model.compile(loss='mse', optimizer='sgd')
       model.fit(x, y, epochs=1, batch_size=1)
 
+  @tf_test_util.run_v1_only('b/120545219')
   def test_Bidirectional_merged_value(self):
     rnn = keras.layers.LSTM
     samples = 2
@@ -505,6 +506,7 @@ class BidirectionalTest(test.TestCase):
       layer.trainable = True
       assert len(layer.trainable_weights) == 6
 
+  @tf_test_util.run_v1_only('b/120545219')
   def test_Bidirectional_updates(self):
     with self.cached_session():
       x = keras.layers.Input(shape=(3, 2))

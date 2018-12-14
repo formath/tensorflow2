@@ -239,7 +239,12 @@ TF_CAPI_EXPORT void TF_InitMain(const char* usage, int* argc, char*** argv);
 
 // Platform-specific implementation to return an unused port. (This should used
 // in tests only.)
-TF_CAPI_EXPORT int TF_PickUnusedPortOrDie();
+TF_CAPI_EXPORT int TF_PickUnusedPortOrDie(void);
+
+// Fast path method that makes constructing a single scalar tensor require less
+// overhead and copies.
+TF_CAPI_EXPORT extern TFE_TensorHandle* TFE_NewTensorHandleFromScalar(
+    TF_DataType dtype, void* scalar, size_t len);
 
 #ifdef __cplusplus
 } /* end extern "C" */

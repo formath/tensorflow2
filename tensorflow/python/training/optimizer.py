@@ -24,6 +24,8 @@ import abc
 
 import six
 
+from tensorflow.python.distribute import distribute_lib
+from tensorflow.python.distribute import distribution_strategy_context as distribute_ctx
 from tensorflow.python.distribute import reduce_util as ds_reduce_util
 from tensorflow.python.eager import backprop
 from tensorflow.python.eager import context
@@ -37,8 +39,6 @@ from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.ops import state_ops
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops import variables
-from tensorflow.python.training import distribute as distribute_lib
-from tensorflow.python.training import distribution_strategy_context as distribute_ctx
 from tensorflow.python.training import slot_creator
 from tensorflow.python.training.checkpointable import base as checkpointable
 from tensorflow.python.util import nest
@@ -222,8 +222,7 @@ def _get_processor(v):
       return _TensorProcessor(v)
     else:
       return _DenseResourceVariableProcessor(v)
-  if isinstance(
-      v, resource_variable_ops.ResourceVariable) and not v._in_graph_mode:  # pylint: disable=protected-access
+  if resource_variable_ops.is_resource_variable(v) and not v._in_graph_mode:  # pylint: disable=protected-access
     # True if and only if `v` was initialized eagerly.
     return _DenseResourceVariableProcessor(v)
   import tensorflow.contrib.lookup as lookup
@@ -238,7 +237,7 @@ def _get_processor(v):
   raise NotImplementedError("Trying to optimize unsupported type ", v)
 
 
-@tf_export("train.Optimizer")
+@tf_export(v1=["train.Optimizer"])
 class Optimizer(
     # Optimizers inherit from CheckpointableBase rather than Checkpointable
     # since they do most of their dependency management themselves (slot
@@ -693,8 +692,10 @@ class Optimizer(
         ds_reduce_util.ReduceOp.SUM, grads_and_vars)
     var_list = [v for _, v in grads_and_vars]
     grads_and_vars = zip(reduced_grads, var_list)
+
     # Note that this is called in a cross-replica context.
-    self._create_slots(var_list)
+    with ops.init_scope():
+      self._create_slots(var_list)
 
     def update(v, g):
       """Apply gradients to a replica variable."""
@@ -711,7 +712,13 @@ class Optimizer(
             "Gradient must be a Tensor, IndexedSlices, or None: %s" % g)
       p = _get_processor(v)
 
-      scope_name = "" if context.executing_eagerly() else v.op.name
+      if context.executing_eagerly() or (
+          resource_variable_ops.is_resource_variable(v) and
+          not v._in_graph_mode):  # pylint: disable=protected-access
+        scope_name = v.name.split(":")[0]
+      else:
+        scope_name = v.op.name
+
       # device_policy is set because non-mirrored tensors will be read in
       # `update_op`. `_resource_apply_dense`, `lr_t`, `beta1_t` and `beta2_t`
       # is an example.
@@ -778,7 +785,7 @@ class Optimizer(
       # `_resource_apply_dense`.
       distributed_container = var._distributed_container()
       assert distributed_container is not None
-      if context.executing_eagerly():
+      if ops.executing_eagerly_outside_functions():
         key = distributed_container._unique_id
       else:
         key = (distributed_container.graph, distributed_container._shared_name)
@@ -847,7 +854,10 @@ class Optimizer(
               name=name, shape=None)
           if restored_initial_value is not None:
             initial_value = restored_initial_value
-        v = variable_scope.variable(initial_value, name=name, trainable=False)
+        v = variable_scope.variable(
+            initial_value, name=name, trainable=False,
+            use_resource=resource_variable_ops.is_resource_variable(
+                colocate_with))
       # Restore this variable by name if necessary, but don't add a
       # Checkpointable dependency. Optimizers return the current graph's
       # non-slot variables from _checkpoint_dependencies explicitly rather

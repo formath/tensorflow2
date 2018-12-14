@@ -18,6 +18,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import functools
 import imp
 
 import gast
@@ -72,12 +73,31 @@ def is_whitelisted_for_graph(o):
   Returns:
     Boolean
   """
-  m = tf_inspect.getmodule(o)
+  # TODO(b/120224672): Fix this.
+  if isinstance(o, functools.partial):
+    # tf_inspect.getmodule(functools.partial(...)) otherwise returns None since
+    # functools.partial objects do not have a __module__ attribute.
+    m = functools
+  else:
+    m = tf_inspect.getmodule(o)
   for prefix, in config.DEFAULT_UNCOMPILED_MODULES:
     if m.__name__.startswith(prefix):
       return True
+
   if hasattr(o, 'autograph_info__'):
     return True
+
+  if inspect_utils.isnamedtuple(o):
+    # Due to the way they're constructed, namedtuple types cannot be converted
+    # because they don't expose source code. But we assume they are safe for
+    # graph mode since they are just containers.
+    if tf_inspect.isclass(o) and len(o.__bases__) > 1:
+      logging.log_first_n(
+          logging.level_warning(),
+          'Entity {} looks like a namedtuple subclass. If it has any custom'
+          ' methods, they will not be converted by AutoGraph.'.format(o), 1)
+    return True
+
   return False
 
 
@@ -109,8 +129,7 @@ def entity_to_graph(o, program_ctx, arg_values, arg_types):
   Raises:
     ValueError: if the entity type is not supported.
   """
-  if program_ctx.options.verbose == converter.Verbosity.VERBOSE:
-    logging.info('Converting {}'.format(o))
+  logging.vlog(logging.DEBUG, 'Converting %s', o)
 
   if tf_inspect.isclass(o):
     node, name, ns = class_to_graph(o, program_ctx)
@@ -144,9 +163,9 @@ def entity_to_graph(o, program_ctx, arg_values, arg_types):
 
   program_ctx.add_to_cache(o, node)
 
-  if program_ctx.options.verbose == converter.Verbosity.VERBOSE:
-    logging.info('Compiled output of {}:\n\n{}\n'.format(
-        o, compiler.ast_to_source(node)))
+  if logging.get_verbosity() <= logging.DEBUG:
+    logging.vlog(logging.DEBUG, 'Compiled output of %s:\n\n%s\n', o,
+                 compiler.ast_to_source(node))
 
   if program_ctx.options.recursive:
     while True:
@@ -281,11 +300,10 @@ def function_to_graph(f,
   node, source = parser.parse_entity(f)
   node = node.body[0]
 
-  # In general, the output of inspect.getsource is inexact because it uses crude
-  # regex matching methods to search the source file. This is particularly
-  # problematic for lambda functions, where the entire containing lines are
-  # returned. Certain distributions of CPython may also return the enclosing
-  # function for local functions.
+  # In general, the output of inspect.getsource is inexact because it uses
+  # regex matching to adjust the exact location around the line number that
+  # CPython records. This is particularly problematic for lambda functions,
+  # where the entire containing lines are returned.
   nodes = ast_util.find_matching_definitions(node, f)
   if len(nodes) != 1:
     if f.__name__ == '<lambda>':
@@ -295,17 +313,11 @@ def function_to_graph(f,
           ' matching signature. To avoid ambiguity, define each lambda'
           ' in a separate expression.'.format(f, source))
     else:
-      # The inspect.getsource bug is currently known to occur in the Windows
-      # integration tests which run Python 3.6.
-      # TODO(mdan): Find out eaxctly which distribution of Python is that.
       raise ValueError(
           'Unable to identify source code of function {}. The source code'
           ' reported by Python did not include exactly one matching signature:'
-          '\n{}\nTo avoid ambiguity, use a unique name for each'
-          ' function.\nNote that some distributions of Python may report source'
-          ' code incorrectly. It may be possible to avoid that bug by'
-          ' organizing the code into smaller units (smaller files, functions or'
-          ' classes), or by turning AutoGraph off.'.format(f, source))
+          '\n{}\n. This is an extremely rare occurrence. Please report it to'
+          ' the TensorFlow team.'.format(f, source))
   node, = nodes
 
   # TODO(znado): Place inside standard_analysis.

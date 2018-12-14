@@ -1760,7 +1760,7 @@ def adjust_saturation(image, saturation_factor, name=None):
         orig_dtype)
 
 
-@tf_export('image.is_jpeg')
+@tf_export('io.is_jpeg', 'image.is_jpeg', v1=['io.is_jpeg', 'image.is_jpeg'])
 def is_jpeg(contents, name=None):
   r"""Convenience function to check if the 'contents' encodes a JPEG image.
 
@@ -1795,8 +1795,28 @@ def _is_png(contents, name=None):
     substr = string_ops.substr(contents, 0, 3)
     return math_ops.equal(substr, b'\211PN', name=name)
 
+tf_export('io.decode_and_crop_jpeg', 'image.decode_and_crop_jpeg',
+          v1=['io.decode_and_crop_jpeg', 'image.decode_and_crop_jpeg'])(
+              gen_image_ops.decode_and_crop_jpeg)
 
-@tf_export('image.decode_image')
+tf_export('io.decode_bmp', 'image.decode_bmp',
+          v1=['io.decode_bmp', 'image.decode_bmp'])(gen_image_ops.decode_bmp)
+tf_export('io.decode_gif', 'image.decode_gif',
+          v1=['io.decode_gif', 'image.decode_gif'])(gen_image_ops.decode_gif)
+tf_export('io.decode_jpeg', 'image.decode_jpeg',
+          v1=['io.decode_jpeg', 'image.decode_jpeg'])(gen_image_ops.decode_jpeg)
+tf_export('io.decode_png', 'image.decode_png',
+          v1=['io.decode_png', 'image.decode_png'])(gen_image_ops.decode_png)
+
+tf_export('io.encode_jpeg', 'image.encode_jpeg',
+          v1=['io.encode_jpeg', 'image.encode_jpeg'])(gen_image_ops.encode_jpeg)
+tf_export('io.extract_jpeg_shape', 'image.extract_jpeg_shape',
+          v1=['io.extract_jpeg_shape', 'image.extract_jpeg_shape'])(
+              gen_image_ops.extract_jpeg_shape)
+
+
+@tf_export('io.decode_image', 'image.decode_image',
+           v1=['io.decode_image', 'image.decode_image'])
 def decode_image(contents, channels=None, dtype=dtypes.uint8, name=None):
   """Convenience function for `decode_bmp`, `decode_gif`, `decode_jpeg`,
   and `decode_png`.
@@ -2026,9 +2046,8 @@ def sample_distorted_bounding_box_v2(image_size,
       3-D with shape `[batch, N, 4]` describing the N bounding boxes
       associated with the image.
     seed: An optional `int`. Defaults to `0`.
-      If either `seed` or `seed2` are set to non-zero, the random number
-      generator is seeded by the given `seed`.  Otherwise, it is seeded by a
-      random seed.
+      If `seed` is set to non-zero, the random number generator is seeded by
+      the given `seed`.  Otherwise, it is seeded by a random seed.
     min_object_covered: A Tensor of type `float32`. Defaults to `0.1`.
       The cropped area of the image must contain at least this
       fraction of any bounding box supplied. The value of this parameter should

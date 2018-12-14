@@ -65,6 +65,15 @@ def _test_optimizer(optimizer, target=0.75):
   optim = keras.optimizers.deserialize(config)
   new_config = keras.optimizers.serialize(optim)
   new_config['class_name'] = new_config['class_name'].lower()
+  new_config['config'].pop('name', None)
+  if 'amsgrad' not in config['config']:
+    new_config['config'].pop('amsgrad', None)
+  if 'decay' in new_config['config'] and 'schedule_decay' in config['config']:
+    new_config['config']['schedule_decay'] = new_config['config'].pop('decay')
+  if 'momentum' not in config['config']:
+    new_config['config'].pop('momentum', None)
+  if 'centered' not in config['config']:
+    new_config['config'].pop('centered', None)
   assert config == new_config
 
   # Test constraints.

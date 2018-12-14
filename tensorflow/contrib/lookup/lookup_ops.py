@@ -103,7 +103,7 @@ def index_table_from_tensor(mapping,
   The bucket ID range is `[mapping size, mapping size + num_oov_buckets - 1]`.
 
   The underlying table must be initialized by calling
-  `tf.tables_initializer.run()` or `table.initializer.run()` once.
+  `session.run(tf.tables_initializer)` or `session.run(table.init)` once.
 
   Elements in `mapping` cannot have duplicates, otherwise when executing the
   table initializer op, it will throw a `FailedPreconditionError`.
@@ -170,7 +170,7 @@ def string_to_index(tensor, mapping, default_value=-1, name=None):
   will throw a FailedPreconditionError.
 
   The underlying table must be initialized by calling
-  `tf.tables_initializer.run()` once.
+  `session.run(tf.tables_initializer)` once.
 
   For example:
 
@@ -214,7 +214,7 @@ def index_to_string_table_from_tensor(mapping, default_value="UNK", name=None):
   (an out-of-vocabulary entry) is assigned the `default_value`
 
   The underlying table must be initialized by calling
-  `tf.tables_initializer.run()` or `table.initializer.run()` once.
+  `session.run(tf.tables_initializer)` or `session.run(table.init)` once.
 
   Elements in `mapping` cannot have duplicates, otherwise when executing the
   table initializer op, it will throw a `FailedPreconditionError`.
@@ -269,7 +269,7 @@ def index_to_string(tensor, mapping, default_value="UNK", name=None):
   (an out-of-vocabulary entry) is assigned the `default_value`
 
   The underlying table must be initialized by calling
-  `tf.tables_initializer.run()` once.
+  `session.run(tf.tables_initializer)` once.
 
   For example:
 

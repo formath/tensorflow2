@@ -28,6 +28,7 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "tensorflow/compiler/xla/layout_util.h"
 #include "tensorflow/compiler/xla/primitive_util.h"
+#include "tensorflow/compiler/xla/shape.h"
 #include "tensorflow/compiler/xla/status_macros.h"
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/types.h"
@@ -467,6 +468,9 @@ class ShapeUtil {
   // arrays.
   static bool IsArray(const Shape& shape);
 
+  // Returns whether the given primitive type corresponds to an array shape.
+  static bool IsArrayPrimitiveType(PrimitiveType primitive_type);
+
   // Returns whether the shape is a tuple with at least one element which is
   // also a tuple.
   static bool IsNestedTuple(const Shape& shape);
@@ -546,6 +550,9 @@ class ShapeUtil {
   // Returns true if `shape` (which must be an array) with degenerate dimensions
   // (dimensions with bound 1).
   static bool HasDegenerateDimensions(const Shape& shape);
+
+  // Drops any degenerate dimensions (i.e. dimensions of size 1)
+  static Shape DropDegenerateDimensions(const Shape& shape);
 
   // Permutes the dimensions by the given permutation, so
   // return_value.dimensions[permutation[i]] = argument.dimensions[i].
@@ -793,8 +800,6 @@ class ShapeUtil {
 
   TF_DISALLOW_COPY_AND_ASSIGN(ShapeUtil);
 };
-
-std::ostream& operator<<(std::ostream& out, const Shape& shape);
 
 }  // namespace xla
 

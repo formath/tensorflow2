@@ -481,7 +481,9 @@ Status ShapeVerifier::HandleCustomCall(HloInstruction* instruction) {
       const Shape& operand_shape_with_layout =
           custom_call->operand_shapes_with_layout()[i];
       TF_RET_CHECK(ShapeUtil::Compatible(custom_call->operand(i)->shape(),
-                                         operand_shape_with_layout));
+                                         operand_shape_with_layout))
+          << custom_call->operand(i)->shape().ToString() << " operand "
+          << operand_shape_with_layout.ToString();
       TF_RET_CHECK(LayoutUtil::HasLayout(operand_shape_with_layout));
     }
   }
@@ -753,7 +755,13 @@ Status ShapeVerifier::HandleAfterAll(HloInstruction* token) {
   for (const HloInstruction* operand : token->operands()) {
     operand_shapes.push_back(&operand->shape());
   }
-  return CheckShape(token, ShapeInference::InferAfterAllShape(operand_shapes));
+  return CheckShape(token, ShapeUtil::MakeTokenShape());
+}
+
+Status ShapeVerifier::HandleAddDependency(HloInstruction* add_dependency) {
+  TF_RETURN_IF_ERROR(CheckOperandCount(add_dependency, 2));
+  TF_RETURN_IF_ERROR(CheckIsTokenOperand(add_dependency, 1));
+  return CheckShape(add_dependency, add_dependency->operand(0)->shape());
 }
 
 Status ShapeVerifier::HandleGetDimensionSize(HloInstruction* get_size) {
@@ -1373,9 +1381,8 @@ class InstructionVerifier : public DfsHloVisitorWithDefault {
           const Layout& operand_layout = operand_shape.layout();
           TF_RET_CHECK(LayoutUtil::Equal(result_layout, operand_layout))
               << "Instruction shouldn't change layouts "
-              << instruction->ToString() << " From "
-              << ShapeUtil::HumanString(result_shape) << " To "
-              << ShapeUtil::HumanString(operand_shape);
+              << instruction->ToString() << " From " << result_shape << " To "
+              << operand_shape;
         }
       }
     }

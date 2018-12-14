@@ -246,6 +246,12 @@ config_setting(
     visibility = ["//visibility:public"],
 )
 
+config_setting(
+    name = "no_nccl_support",
+    define_values = {"no_nccl_support": "true"},
+    visibility = ["//visibility:public"],
+)
+
 # Crosses between platforms and file system libraries not supported on those
 # platforms due to limitations in nested select() statements.
 config_setting(
@@ -600,9 +606,11 @@ py_library(
     name = "tensorflow_py",
     srcs_version = "PY2AND3",
     visibility = ["//visibility:public"],
-    deps = [
+    deps = select({
+        "api_version_2": [],
+        "//conditions:default": ["//tensorflow/contrib:contrib_py"],
+    }) + [
         ":tensorflow_py_no_contrib",
-        "//tensorflow/contrib:contrib_py",
         "//tensorflow/python/estimator:estimator_py",
     ],
 )

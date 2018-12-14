@@ -23,6 +23,7 @@ import six
 
 from tensorflow.python.client import device_lib
 from tensorflow.python.distribute import cross_device_utils
+from tensorflow.python.distribute import device_util
 from tensorflow.python.distribute import reduce_util
 from tensorflow.python.distribute import values as value_lib
 from tensorflow.python.eager import context
@@ -31,7 +32,6 @@ from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.platform import tf_logging as logging
-from tensorflow.python.training import device_util
 
 
 def check_destinations(destinations):
@@ -53,13 +53,51 @@ def validate_destinations(destinations):
   if not isinstance(
       destinations,
       (value_lib.DistributedValues, resource_variable_ops.ResourceVariable,
-       value_lib.AggregatingVariable, six.string_types, list)):
+       value_lib.AggregatingVariable, six.string_types, list, tuple,
+       value_lib.TPUMirroredVariable)):
     raise ValueError("destinations must be one of a `DistributedValues` object,"
-                     " a tf.Variable object, a device string, a list of device "
-                     "strings")
+                     " a tf.Variable object, a device string, a list or tuple "
+                     "of device strings")
 
   if not check_destinations(destinations):
     raise ValueError("destinations can not be empty")
+
+
+def reduce_non_distributed_value(extended, reduce_op, value, destinations):
+  """Reduce a non-DistributedValue `value` to `destinations`."""
+  if isinstance(value, value_lib.DistributedValues):
+    raise ValueError("You are passing a `DistributedValue` to "
+                     "`reduce_non_distributed_value`, which is not allowed.")
+
+  # If the same value is present on all replicas then the PerReplica value will
+  # be a single value. We also handle the case when `value` is a single value
+  # and equal to 0.
+  if value == 0:
+    return 0
+  # If there is only a single value and the reduce op is MEAN,
+  # that value should be on all destinations.
+  if reduce_op == reduce_util.ReduceOp.MEAN:
+    return value
+
+  validate_destinations(destinations)
+  # We do not support a reduce op of SUM if the value is the same across
+  # all replicas. We call this as part of assign functions for MirroredVariables
+  # and summing up identical values across replicas is not clearly defined.
+  if (len(extended.worker_devices) != 1 or
+      not check_destinations(destinations)):
+    raise ValueError("A non-DistributedValues value %s cannot be reduced with "
+                     "the given reduce op %s." % (value, reduce_op))
+  # TODO(anjalisridhar): Moves these methods to a device utility file?
+  devices = get_devices_from(destinations)
+  if len(devices) == 1:
+    with ops.device(devices[0]):
+      return array_ops.identity(value)
+  else:
+    value_updates = {}
+    for d in devices:
+      with ops.device(d):
+        value_updates[d] = array_ops.identity(value)
+    return value_lib.Mirrored(value_updates)
 
 
 def _make_tensor_into_per_replica(input_tensor):
@@ -103,10 +141,10 @@ def _validate_value_destination_pairs(value_destination_pairs):
   # pylint: disable=g-missing-docstring
   if not value_destination_pairs: return False
   if not isinstance(value_destination_pairs, (list, tuple)): return False
-  if not all([isinstance(pair, tuple) for pair in value_destination_pairs]):
+  if not all(isinstance(pair, tuple) for pair in value_destination_pairs):
     return False
-  if not all([isinstance(v[0], value_lib.PerReplica)
-              for v in value_destination_pairs]):
+  if not all(isinstance(v[0], value_lib.PerReplica)
+             for v in value_destination_pairs):
     return False
   return True
 
@@ -132,10 +170,10 @@ def _devices_match(left, right):
 
 
 def _all_devices_match(value_destination_pairs):
-  if not all([_devices_match(v, d) for v, d in value_destination_pairs]):
+  if not all(_devices_match(v, d) for v, d in value_destination_pairs):
     return False
-  if not all([_devices_match(v, value_destination_pairs[0][0])
-              for v, _ in value_destination_pairs[1:]]):
+  if not all(_devices_match(v, value_destination_pairs[0][0])
+             for v, _ in value_destination_pairs[1:]):
     return False
   return True
 
@@ -401,7 +439,7 @@ class ConcatAndSplitPacker(object):
         # all gradient shapes are defined, we use another method to get the
         # total size.
         # TODO(yuefengz): move this logic to array_ops.size.
-        if all([g.shape.is_fully_defined() for g, _ in device_grads_and_vars]):
+        if all(g.shape.is_fully_defined() for g, _ in device_grads_and_vars):
           total_grad_size = sum(
               [g.shape.num_elements() for g, _ in device_grads_and_vars])
         else:
@@ -916,15 +954,15 @@ def _choose_all_reduce_algorithm(device_links):
 
 
 def choose_the_best(devices, session_config=None):
-  """Find the best subclass of CrossDeviceOps given a tensorflow session.
+  """Find the best subclass of CrossDeviceOps given a session config.
 
   Args:
-    devices: a list of devices passed for distribute strategy.
-    session_config: a tensorflow session config or None. If None, it will make
-      deciesion based on all local devices.
+    devices: a list of devices passed to `tf.distribute.Strategy`.
+    session_config: a `tf.ConfigProto` or `None`. If `None`, it will make
+      decision based on all local devices.
 
   Returns:
-    a subclass of CrossDeviceOps.
+    A subclass of `CrossDeviceOps`.
   """
   requested_devices = set([device_util.canonicalize(d) for d in devices])
   machine_devices = device_lib.list_local_devices(session_config=session_config)
@@ -937,13 +975,13 @@ def choose_the_best(devices, session_config=None):
           "Device is available but not used by distribute strategy: %s", d.name)
 
   if len(using_devices) != len(requested_devices):
-    logging.warning("Not all devices in distribute strategy are visible by "
-                    "TensorFlow sessions.")
+    logging.warning("Not all devices in `tf.distribute.Strategy` are visible "
+                    "to TensorFlow.")
     return ReductionToOneDeviceCrossDeviceOps()
 
-  if any([d.device_type.lower() != "gpu" for d in using_devices]):
-    logging.warning("Not all devices in DistributionStrategy are visible to "
-                    "TensorFlow session.")
+  if any(d.device_type.lower() != "gpu" for d in using_devices):
+    logging.warning("Not all devices in `tf.distribute.Strategy` are visible "
+                    "to TensorFlow.")
     return ReductionToOneDeviceCrossDeviceOps()
 
   device_links = [[] for _ in range(len(using_devices))]

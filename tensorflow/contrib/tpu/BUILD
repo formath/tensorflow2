@@ -14,6 +14,7 @@ load("//tensorflow:tensorflow.bzl", "tf_py_test")
 package(
     default_visibility = [
         "//cloud/vmm/testing/tests/tpu:__subpackages__",
+        "//knowledge/cerebra/sense/im2query:__subpackages__",
         "//learning/brain:__subpackages__",
         "//learning/deepmind:__subpackages__",
         "//medical/pathology:__subpackages__",
@@ -78,6 +79,7 @@ py_library(
         "//tensorflow/python:init_ops",
         "//tensorflow/python:math_ops",
         "//tensorflow/python:platform",
+        "//tensorflow/python:session",
         "//tensorflow/python:state_ops",
         "//tensorflow/python:summary",
         "//tensorflow/python:summary_ops_v2",
@@ -100,6 +102,7 @@ tf_gen_op_libs(
         "replication_ops",
         "tpu_configuration_ops",
         "tpu_embedding_ops",
+        "tpu_ordinal_selector_op",
     ],
     deps = [
         "//tensorflow/contrib/tpu/proto:tpu_embedding_configuration_proto_cc",
@@ -148,6 +151,13 @@ tf_gen_op_wrapper_py(
         ":replication_ops_op_lib",
         ":tpu_configuration_ops_op_lib",
         ":tpu_embedding_ops_op_lib",
+    ],
+)
+
+tf_gen_op_wrapper_py(
+    name = "tpu_ordinal_selector_op",
+    deps = [
+        ":tpu_ordinal_selector_op_op_lib",
     ],
 )
 
@@ -215,7 +225,7 @@ py_library(
     ],
     deps = [
         ":tpu_lib",
-        "//tensorflow/contrib/cluster_resolver:tpu_cluster_resolver_py",
+        "//tensorflow/contrib/cluster_resolver:cluster_resolver_py",
         "//tensorflow/contrib/distribute",
         "//tensorflow/contrib/framework:framework_py",
         "//tensorflow/contrib/tpu/proto:compilation_result_proto_py",
@@ -263,7 +273,7 @@ py_library(
         ":tpu_py",
         "//tensorflow/compiler/xla/experimental/xla_sharding",
         "//tensorflow/compiler/xla/python_api:xla_shape",
-        "//tensorflow/contrib/cluster_resolver:tpu_cluster_resolver_py",
+        "//tensorflow/contrib/cluster_resolver:cluster_resolver_py",
         "//tensorflow/contrib/compiler:xla",
         "//tensorflow/contrib/tpu/proto:compilation_result_proto_py",
         "//tensorflow/contrib/tpu/proto:optimization_parameters_proto_py",

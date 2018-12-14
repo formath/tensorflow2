@@ -13,10 +13,6 @@ tf_module {
     mtype: "<type \'type\'>"
   }
   member {
-    name: "SessionLog"
-    mtype: "<class \'google.protobuf.pyext.cpp_message.GeneratedProtocolMessageType\'>"
-  }
-  member {
     name: "Summary"
     mtype: "<class \'google.protobuf.pyext.cpp_message.GeneratedProtocolMessageType\'>"
   }
@@ -45,11 +41,11 @@ tf_module {
     argspec: "args=[\'tensor\', \'name\'], varargs=None, keywords=None, defaults=[\'None\'], "
   }
   member_method {
-    name: "record_summaries"
-    argspec: "args=[\'boolean\'], varargs=None, keywords=None, defaults=[\'True\'], "
+    name: "summary_scope"
+    argspec: "args=[\'name\', \'default_name\', \'values\'], varargs=None, keywords=None, defaults=[\'summary\', \'None\'], "
   }
   member_method {
-    name: "should_record_summaries"
-    argspec: "args=[], varargs=None, keywords=None, defaults=None"
+    name: "write"
+    argspec: "args=[\'tag\', \'tensor\', \'step\', \'metadata\', \'name\'], varargs=None, keywords=None, defaults=[\'None\', \'None\'], "
   }
 }
