@@ -519,7 +519,7 @@ class MutableHashTable(LookupInterface):
         values.set_shape(keys.get_shape().concatenate([1]))
     return values
 
-  def insert(self, keys, values, name=None):
+  def insert(self, keys, values, for_init=False, name=None):
     """Associates `keys` with `values`.
 
     Args:
@@ -543,7 +543,7 @@ class MutableHashTable(LookupInterface):
       with ops.colocate_with(self.resource_handle):
         # pylint: disable=protected-access
         op = gen_lookup_ops.lookup_table_insert_v2(
-            self.resource_handle, keys, values, name=name)
+            self.resource_handle, keys, values, ops.convert_to_tensor(for_init), name=name)
     return op
 
   def export(self, name=None):
@@ -700,7 +700,7 @@ class PartitionedMutableHashTable(object):
         size += self._table_ref_list[i].size()
     return size
 
-  def insert(self, keys, values, name=None):
+  def insert(self, keys, values, for_init=False, name=None):
     """Associates `keys` with `values`.
 
     Args:
@@ -729,7 +729,8 @@ class PartitionedMutableHashTable(object):
     value_partitions = data_flow_ops.dynamic_partition(values, key_assignments, self._shard_num)
     partitioned_ops = []
     for i in range(self._shard_num):
-      partitioned_ops.append(self._table_ref_list[i].insert(key_partitions[i], value_partitions[i]))
+      partitioned_ops.append(self._table_ref_list[i].insert(key_partitions[i],
+        value_partitions[i], for_init))
     return control_flow_ops.group(*partitioned_ops)
 
 
@@ -924,7 +925,7 @@ class MutableDenseHashTable(LookupInterface):
               [1]))
     return values
 
-  def insert(self, keys, values, name=None):
+  def insert(self, keys, values, for_init=False, name=None):
     """Associates `keys` with `values`.
 
     Args:
@@ -948,7 +949,7 @@ class MutableDenseHashTable(LookupInterface):
           values, dtype=self._value_dtype, name="values")
       with ops.colocate_with(self.resource_handle):
         op = gen_lookup_ops.lookup_table_insert_v2(
-            self.resource_handle, keys, values, name=name)
+            self.resource_handle, keys, values, ops.convert_to_tensor(for_init), name=name)
       return op
 
   def remove(self, keys, name=None):

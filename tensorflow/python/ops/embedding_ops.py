@@ -783,7 +783,8 @@ def _embedding_lookup_with_hash_table(emb_table,
         ids_not_contain = array_ops.boolean_mask(gen_array_ops.reshape(pass_ids, shape=(-1, 1)), gen_math_ops.logical_not(table_contain_mask))
         table_insert_op = control_flow_ops.cond(array_ops.size(ids_not_contain) > 0,
           lambda: emb_table.insert(ids_not_contain,
-                                   initializer(array_ops.concat([[array_ops.size(ids_not_contain)], array_ops.shape(emb_table._default_value)], 0))),
+                                   initializer(array_ops.concat([[array_ops.size(ids_not_contain)], array_ops.shape(emb_table._default_value)], 0)),
+                                   True),
           lambda: control_flow_ops.group(*[gen_control_flow_ops.no_op()]))
         with ops.control_dependencies([table_insert_op]):
           emb = emb_table.lookup(orig_ids)
@@ -792,7 +793,8 @@ def _embedding_lookup_with_hash_table(emb_table,
       ids_not_contain = array_ops.boolean_mask(gen_array_ops.reshape(ids, shape=(-1, 1)), gen_math_ops.logical_not(table_contain_mask))
       table_insert_op = control_flow_ops.cond(array_ops.size(ids_not_contain) > 0,
         lambda: emb_table.insert(ids_not_contain,
-                                 initializer(array_ops.concat([[array_ops.size(ids_not_contain)], array_ops.shape(emb_table._default_value)], 0))),
+                                 initializer(array_ops.concat([[array_ops.size(ids_not_contain)], array_ops.shape(emb_table._default_value)], 0)),
+                                 True),
         lambda: control_flow_ops.group(*[gen_control_flow_ops.no_op()]))
       with ops.control_dependencies([table_insert_op]):
         emb = emb_table.lookup(orig_ids)

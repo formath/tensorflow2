@@ -76,7 +76,7 @@ class LookupInterface : public ResourceBase {
   //   fails.
   // - Unimplemented: if the table does not support insertions.
   virtual Status Insert(OpKernelContext* ctx, const Tensor& keys,
-                        const Tensor& values) = 0;
+                        const Tensor& values, bool for_init) = 0;
 
   // Removes elements from the table.
   // This method is only implemented in mutable tables that can be updated over

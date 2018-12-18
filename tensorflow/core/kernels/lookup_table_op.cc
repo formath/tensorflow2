@@ -82,7 +82,8 @@ class MutableHashTableOfScalars final : public LookupInterface {
     return Status::OK();
   }
 
-  Status DoInsert(bool clear, const Tensor& keys, const Tensor& values) {
+  Status DoInsert(bool clear, const Tensor& keys,
+    const Tensor& values, bool for_init) {
     const auto key_values = keys.flat<K>();
     const auto value_values = values.flat<V>();
 
@@ -91,6 +92,11 @@ class MutableHashTableOfScalars final : public LookupInterface {
       table_.clear();
     }
     for (int64 i = 0; i < key_values.size(); ++i) {
+      if (for_init &&
+          gtl::FindOrNull(table_,
+            SubtleMustCopyIfIntegral(key_values(i))) != nullptr) {
+        continue;
+      }
       gtl::InsertOrUpdate(&table_, SubtleMustCopyIfIntegral(key_values(i)),
                           SubtleMustCopyIfIntegral(value_values(i)));
     }
@@ -98,8 +104,8 @@ class MutableHashTableOfScalars final : public LookupInterface {
   }
 
   Status Insert(OpKernelContext* ctx, const Tensor& keys,
-                const Tensor& values) override {
-    return DoInsert(false, keys, values);
+                const Tensor& values, bool for_init) override {
+    return DoInsert(false, keys, values, for_init);
   }
 
   Status Remove(OpKernelContext* ctx, const Tensor& keys) override {
@@ -114,7 +120,7 @@ class MutableHashTableOfScalars final : public LookupInterface {
 
   Status ImportValues(OpKernelContext* ctx, const Tensor& keys,
                       const Tensor& values) override {
-    return DoInsert(true, keys, values);
+    return DoInsert(true, keys, values, false);
   }
 
   Status ExportValues(OpKernelContext* ctx) override {
@@ -222,7 +228,7 @@ class MutableHashTableOfTensors final : public LookupInterface {
     return Status::OK();
   }
 
-  Status DoInsert(bool clear, const Tensor& keys, const Tensor& values) {
+  Status DoInsert(bool clear, const Tensor& keys, const Tensor& values, bool for_init) {
     const auto key_values = keys.flat<K>();
     const auto value_values = values.flat_inner_dims<V, 2>();
     int64 value_dim = value_shape_.dim_size(0);
@@ -232,6 +238,10 @@ class MutableHashTableOfTensors final : public LookupInterface {
       table_.clear();
     }
     for (int64 i = 0; i < key_values.size(); ++i) {
+      if (for_init && gtl::FindOrNull(
+          table_, SubtleMustCopyIfIntegral(key_values(i))) != nullptr) {
+        continue;
+      }
       ValueArray value_vec;
       for (int64 j = 0; j < value_dim; j++) {
         V value = value_values(i, j);
@@ -244,8 +254,8 @@ class MutableHashTableOfTensors final : public LookupInterface {
   }
 
   Status Insert(OpKernelContext* ctx, const Tensor& keys,
-                const Tensor& values) override {
-    return DoInsert(false, keys, values);
+                const Tensor& values, bool for_init) override {
+    return DoInsert(false, keys, values, for_init);
   }
 
   Status Remove(OpKernelContext* ctx, const Tensor& keys) override {
@@ -260,7 +270,7 @@ class MutableHashTableOfTensors final : public LookupInterface {
 
   Status ImportValues(OpKernelContext* ctx, const Tensor& keys,
                       const Tensor& values) override {
-    return DoInsert(true, keys, values);
+    return DoInsert(true, keys, values, false);
   }
 
   Status ExportValues(OpKernelContext* ctx) override {
@@ -483,7 +493,7 @@ class MutableDenseHashTable final : public LookupInterface {
   }
 
   Status Insert(OpKernelContext* ctx, const Tensor& key,
-                const Tensor& value) override LOCKS_EXCLUDED(mu_) {
+                const Tensor& value, bool for_init) override LOCKS_EXCLUDED(mu_) {
     const int64 batch_size = (key.dims() == 0) ? 1 : key.dim_size(0);
     if (key.NumElements() != batch_size * key_shape_.num_elements()) {
       TensorShape expected_shape({batch_size});
@@ -903,13 +913,15 @@ class LookupTableInsertOp : public OpKernel {
 
     const Tensor& keys = ctx->input(1);
     const Tensor& values = ctx->input(2);
+    const Tensor& for_init = ctx->input(3);
+    bool for_init_flag = for_init.flat<bool>()(0);
     OP_REQUIRES_OK(ctx, table->CheckKeyAndValueTensorsForInsert(keys, values));
 
     int64 memory_used_before = 0;
     if (ctx->track_allocations()) {
       memory_used_before = table->MemoryUsed();
     }
-    OP_REQUIRES_OK(ctx, table->Insert(ctx, keys, values));
+    OP_REQUIRES_OK(ctx, table->Insert(ctx, keys, values, for_init_flag));
     if (ctx->track_allocations()) {
       ctx->record_persistent_memory_allocation(table->MemoryUsed() -
                                                memory_used_before);

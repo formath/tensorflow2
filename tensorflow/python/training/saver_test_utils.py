@@ -57,7 +57,7 @@ class CheckpointedOp(object):
       return self._saveable
 
   def insert(self, keys, values):
-    return gen_lookup_ops.lookup_table_insert_v2(self.table_ref, keys, values)
+    return gen_lookup_ops.lookup_table_insert_v2(self.table_ref, keys, values, ops_lib.convert_to_tensor(False))
 
   def lookup(self, keys, default):
     return gen_lookup_ops.lookup_table_find_v2(self.table_ref, keys, default)
