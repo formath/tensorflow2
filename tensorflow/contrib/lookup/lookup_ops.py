@@ -704,7 +704,7 @@ class PartitionedMutableHashTable(object):
         size += self._table_ref_list[i].size()
     return size
 
-  def insert(self, keys, values, for_init=False, name=None):
+  def insert(self, keys, values, exit_on_exist=False, name=None):
     """Associates `keys` with `values`.
 
     Args:
@@ -734,7 +734,7 @@ class PartitionedMutableHashTable(object):
     partitioned_ops = []
     for i in range(self._shard_num):
       partitioned_ops.append(self._table_ref_list[i].insert(key_partitions[i],
-        value_partitions[i], for_init))
+        value_partitions[i], exit_on_exist))
     return control_flow_ops.group(*partitioned_ops)
 
 
@@ -929,7 +929,7 @@ class MutableDenseHashTable(LookupInterface):
               [1]))
     return values
 
-  def insert(self, keys, values, for_init=False, name=None):
+  def insert(self, keys, values, exit_on_exist=False, name=None):
     """Associates `keys` with `values`.
 
     Args:
@@ -952,8 +952,12 @@ class MutableDenseHashTable(LookupInterface):
       values = ops.convert_to_tensor(
           values, dtype=self._value_dtype, name="values")
       with ops.colocate_with(self.resource_handle):
-        op = gen_lookup_ops.lookup_table_insert_v2(
-            self.resource_handle, keys, values, ops.convert_to_tensor(for_init), name=name)
+        if not exit_on_exist:
+          op = gen_lookup_ops.lookup_table_insert_v2(
+            self.resource_handle, keys, values, name=name)
+        else:
+          op = gen_lookup_ops.lookup_table_insert_or_not_v2(
+            self.resource_handle, keys, values, name=name)
       return op
 
   def remove(self, keys, name=None):
