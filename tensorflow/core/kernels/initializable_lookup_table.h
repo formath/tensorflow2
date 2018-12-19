@@ -60,7 +60,14 @@ class InitializableLookupTable : public LookupInterface {
 
   // Returns errors::Unimplemented.
   Status Insert(OpKernelContext* ctx, const Tensor& keys,
-                const Tensor& values, bool for_init) final {
+                const Tensor& values) final {
+    return errors::Unimplemented(
+        "Insert not supported by InitializableLookupTable implementations");
+  }
+
+  // Returns errors::Unimplemented.
+  Status InsertOrNot(OpKernelContext* ctx, const Tensor& keys,
+                const Tensor& values) final {
     return errors::Unimplemented(
         "Insert not supported by InitializableLookupTable implementations");
   }

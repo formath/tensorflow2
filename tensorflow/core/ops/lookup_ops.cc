@@ -217,7 +217,6 @@ REGISTER_OP("LookupTableInsert")
     .Input("table_handle: Ref(string)")
     .Input("keys: Tin")
     .Input("values: Tout")
-    .Input("for_init: bool")
     .Attr("Tin: type")
     .Attr("Tout: type")
     .SetShapeFn([](InferenceContext* c) {
@@ -234,7 +233,36 @@ REGISTER_OP("LookupTableInsertV2")
     .Input("table_handle: resource")
     .Input("keys: Tin")
     .Input("values: Tout")
-    .Input("for_init: bool")
+    .Attr("Tin: type")
+    .Attr("Tout: type")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle handle;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 0, &handle));
+
+      // TODO: Validate keys and values shape.
+      return Status::OK();
+    });
+
+REGISTER_OP("LookupTableInsertOrNot")
+    .Input("table_handle: Ref(string)")
+    .Input("keys: Tin")
+    .Input("values: Tout")
+    .Attr("Tin: type")
+    .Attr("Tout: type")
+    .SetShapeFn([](InferenceContext* c) {
+      ShapeHandle handle;
+      TF_RETURN_IF_ERROR(c->WithRank(c->input(0), 1, &handle));
+      DimensionHandle unused_dim;
+      TF_RETURN_IF_ERROR(c->WithValue(c->Dim(handle, 0), 2, &unused_dim));
+
+      // TODO(ebrevdo): Validate keys and values shape.
+      return Status::OK();
+    });
+
+REGISTER_OP("LookupTableInsertOrNotV2")
+    .Input("table_handle: resource")
+    .Input("keys: Tin")
+    .Input("values: Tout")
     .Attr("Tin: type")
     .Attr("Tout: type")
     .SetShapeFn([](InferenceContext* c) {

@@ -76,7 +76,21 @@ class LookupInterface : public ResourceBase {
   //   fails.
   // - Unimplemented: if the table does not support insertions.
   virtual Status Insert(OpKernelContext* ctx, const Tensor& keys,
-                        const Tensor& values, bool for_init) = 0;
+                        const Tensor& values) = 0;
+
+  // Inserts elements into the table if does not exit. Each element of the key tensor is
+  // associated with the corresponding element in the value tensor.
+  // This method is only implemented in mutable tables that can be updated over
+  // the execution of the graph. It returns Status::NotImplemented for read-only
+  // tables that are initialized once before they can be looked up.
+
+  // Returns the following statuses:
+  // - OK: when the insert finishes successfully.
+  // - InvalidArgument: if any of the preconditions on the lookup key or value
+  //   fails.
+  // - Unimplemented: if the table does not support insertions.
+  virtual Status InsertOrNot(OpKernelContext* ctx, const Tensor& keys,
+                             const Tensor& values) = 0;
 
   // Removes elements from the table.
   // This method is only implemented in mutable tables that can be updated over

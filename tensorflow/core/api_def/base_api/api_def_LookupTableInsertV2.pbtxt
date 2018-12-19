@@ -6,7 +6,8 @@ op {
   in_arg {
     name: "table_handle"
     description: <<END
-Handle to the table.
+Handle to the t
+able.
 END
   }
   in_arg {

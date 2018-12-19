@@ -83,7 +83,7 @@ class MutableHashTableOfScalars final : public LookupInterface {
   }
 
   Status DoInsert(bool clear, const Tensor& keys,
-    const Tensor& values, bool for_init) {
+                  const Tensor& values, bool exit_on_exist) {
     const auto key_values = keys.flat<K>();
     const auto value_values = values.flat<V>();
 
@@ -92,7 +92,7 @@ class MutableHashTableOfScalars final : public LookupInterface {
       table_.clear();
     }
     for (int64 i = 0; i < key_values.size(); ++i) {
-      if (for_init &&
+      if (exit_on_exist &&
           gtl::FindOrNull(table_,
             SubtleMustCopyIfIntegral(key_values(i))) != nullptr) {
         continue;
@@ -104,8 +104,13 @@ class MutableHashTableOfScalars final : public LookupInterface {
   }
 
   Status Insert(OpKernelContext* ctx, const Tensor& keys,
-                const Tensor& values, bool for_init) override {
-    return DoInsert(false, keys, values, for_init);
+                const Tensor& values) override {
+    return DoInsert(false, keys, values, false);
+  }
+
+  Status InsertOrNot(OpKernelContext* ctx, const Tensor& keys,
+                const Tensor& values) override {
+    return DoInsert(false, keys, values, true);
   }
 
   Status Remove(OpKernelContext* ctx, const Tensor& keys) override {
@@ -228,7 +233,8 @@ class MutableHashTableOfTensors final : public LookupInterface {
     return Status::OK();
   }
 
-  Status DoInsert(bool clear, const Tensor& keys, const Tensor& values, bool for_init) {
+  Status DoInsert(bool clear, const Tensor& keys,
+                  const Tensor& values, bool exit_on_exist) {
     const auto key_values = keys.flat<K>();
     const auto value_values = values.flat_inner_dims<V, 2>();
     int64 value_dim = value_shape_.dim_size(0);
@@ -238,7 +244,7 @@ class MutableHashTableOfTensors final : public LookupInterface {
       table_.clear();
     }
     for (int64 i = 0; i < key_values.size(); ++i) {
-      if (for_init && gtl::FindOrNull(
+      if (exit_on_exist && gtl::FindOrNull(
           table_, SubtleMustCopyIfIntegral(key_values(i))) != nullptr) {
         continue;
       }
@@ -254,8 +260,13 @@ class MutableHashTableOfTensors final : public LookupInterface {
   }
 
   Status Insert(OpKernelContext* ctx, const Tensor& keys,
-                const Tensor& values, bool for_init) override {
-    return DoInsert(false, keys, values, for_init);
+                const Tensor& values) override {
+    return DoInsert(false, keys, values, false);
+  }
+
+  Status InsertOrNot(OpKernelContext* ctx, const Tensor& keys,
+                const Tensor& values) override {
+    return DoInsert(false, keys, values, true);
   }
 
   Status Remove(OpKernelContext* ctx, const Tensor& keys) override {
@@ -493,7 +504,33 @@ class MutableDenseHashTable final : public LookupInterface {
   }
 
   Status Insert(OpKernelContext* ctx, const Tensor& key,
-                const Tensor& value, bool for_init) override LOCKS_EXCLUDED(mu_) {
+                const Tensor& value) override LOCKS_EXCLUDED(mu_) {
+    const int64 batch_size = (key.dims() == 0) ? 1 : key.dim_size(0);
+    if (key.NumElements() != batch_size * key_shape_.num_elements()) {
+      TensorShape expected_shape({batch_size});
+      expected_shape.AppendShape(key_shape_);
+      return errors::InvalidArgument("Expected key shape ",
+                                     expected_shape.DebugString(), " got ",
+                                     key.shape().DebugString());
+    }
+    mutex_lock l(mu_);
+    // For simplicity we assume that all keys in the input result in inserts
+    // rather than updates. That means we may grow the table even though we
+    // don't need to. As long as the number of keys inserted in one call is
+    // small compared to the size of the map, the impact of this is minimal.
+    const int64 pending_num_entries = num_entries_ + batch_size;
+    if (pending_num_entries > num_buckets_ * max_load_factor_) {
+      int64 new_num_buckets = num_buckets_;
+      do {
+        new_num_buckets <<= 1;
+      } while (pending_num_entries > new_num_buckets * max_load_factor_);
+      TF_RETURN_IF_ERROR(Rebucket(ctx, new_num_buckets));
+    }
+    return DoInsert(ctx, key, value, false);
+  }
+
+  Status InsertOrNot(OpKernelContext* ctx, const Tensor& key,
+                const Tensor& value) override LOCKS_EXCLUDED(mu_) {
     const int64 batch_size = (key.dims() == 0) ? 1 : key.dim_size(0);
     if (key.NumElements() != batch_size * key_shape_.num_elements()) {
       TensorShape expected_shape({batch_size});
@@ -913,15 +950,13 @@ class LookupTableInsertOp : public OpKernel {
 
     const Tensor& keys = ctx->input(1);
     const Tensor& values = ctx->input(2);
-    const Tensor& for_init = ctx->input(3);
-    bool for_init_flag = for_init.flat<bool>()(0);
     OP_REQUIRES_OK(ctx, table->CheckKeyAndValueTensorsForInsert(keys, values));
 
     int64 memory_used_before = 0;
     if (ctx->track_allocations()) {
       memory_used_before = table->MemoryUsed();
     }
-    OP_REQUIRES_OK(ctx, table->Insert(ctx, keys, values, for_init_flag));
+    OP_REQUIRES_OK(ctx, table->Insert(ctx, keys, values));
     if (ctx->track_allocations()) {
       ctx->record_persistent_memory_allocation(table->MemoryUsed() -
                                                memory_used_before);
@@ -933,6 +968,43 @@ REGISTER_KERNEL_BUILDER(Name("LookupTableInsert").Device(DEVICE_CPU),
                         LookupTableInsertOp);
 REGISTER_KERNEL_BUILDER(Name("LookupTableInsertV2").Device(DEVICE_CPU),
                         LookupTableInsertOp);
+
+// Table insert op.
+class LookupTableInsertOrNotOp : public OpKernel {
+ public:
+  explicit LookupTableInsertOrNotOp(OpKernelConstruction* ctx) : OpKernel(ctx) {}
+
+  void Compute(OpKernelContext* ctx) override {
+    lookup::LookupInterface* table;
+    OP_REQUIRES_OK(ctx, GetLookupTable("table_handle", ctx, &table));
+    core::ScopedUnref unref_me(table);
+
+    DataType expected_input_0 =
+        (ctx->input_dtype(0) == DT_RESOURCE) ? DT_RESOURCE : DT_STRING_REF;
+    DataTypeVector expected_inputs = {expected_input_0, table->key_dtype(),
+                                      table->value_dtype()};
+    OP_REQUIRES_OK(ctx, ctx->MatchSignature(expected_inputs, {}));
+
+    const Tensor& keys = ctx->input(1);
+    const Tensor& values = ctx->input(2);
+    OP_REQUIRES_OK(ctx, table->CheckKeyAndValueTensorsForInsert(keys, values));
+
+    int64 memory_used_before = 0;
+    if (ctx->track_allocations()) {
+      memory_used_before = table->MemoryUsed();
+    }
+    OP_REQUIRES_OK(ctx, table->InsertOrNot(ctx, keys, values));
+    if (ctx->track_allocations()) {
+      ctx->record_persistent_memory_allocation(table->MemoryUsed() -
+                                               memory_used_before);
+    }
+  }
+};
+
+REGISTER_KERNEL_BUILDER(Name("LookupTableInsertOrNot").Device(DEVICE_CPU),
+                        LookupTableInsertOrNotOp);
+REGISTER_KERNEL_BUILDER(Name("LookupTableInsertOrNotV2").Device(DEVICE_CPU),
+                        LookupTableInsertOrNotOp);
 
 // Table remove op.
 class LookupTableRemoveOp : public OpKernel {

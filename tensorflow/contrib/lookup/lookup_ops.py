@@ -519,7 +519,7 @@ class MutableHashTable(LookupInterface):
         values.set_shape(keys.get_shape().concatenate([1]))
     return values
 
-  def insert(self, keys, values, for_init=False, name=None):
+  def insert(self, keys, values, exit_on_exist=False, name=None):
     """Associates `keys` with `values`.
 
     Args:
@@ -542,8 +542,12 @@ class MutableHashTable(LookupInterface):
       values = ops.convert_to_tensor(values, self._value_dtype, name="values")
       with ops.colocate_with(self.resource_handle):
         # pylint: disable=protected-access
-        op = gen_lookup_ops.lookup_table_insert_v2(
-            self.resource_handle, keys, values, ops.convert_to_tensor(for_init), name=name)
+        if not exit_on_exist:
+          op = gen_lookup_ops.lookup_table_insert_v2(
+              self.resource_handle, keys, values, name=name)
+        else:
+          op = gen_lookup_ops.lookup_table_insert_or_not_v2(
+              self.resource_handle, keys, values, name=name)
     return op
 
   def export(self, name=None):

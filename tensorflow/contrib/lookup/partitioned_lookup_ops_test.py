@@ -5,7 +5,7 @@ import tensorflow.contrib.lookup as lookup
 table = lookup.PartitionedMutableHashTable(tf.int64,
                tf.float32,
                [0, 0, 0],
-               shard_num=2,
+               shard_num=1,
                name="PartitionedMutableHashTable",
                checkpoint=True,
                trainable=False)
@@ -15,7 +15,7 @@ values = ops.convert_to_tensor([[0.5, 0.6, 0.7], [0.8, 0.9, 1.0]], dtype=tf.floa
 #out = table.contain(keys)
 out = table.lookup(keys)
 #out = table.size(keys)
-op_list = table.insert(keys, values)
+op_list = table.insert(keys, values, False)
 
 with tf.Session() as sess:
   sess.run(op_list)
